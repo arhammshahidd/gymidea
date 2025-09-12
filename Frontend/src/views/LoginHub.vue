@@ -7,7 +7,7 @@
       </div>
 
       <div class="login-options">
-        <div class="login-option" @click="navigateToLogin('/superadmin-login')">
+        <div class="login-option" @click="navigateToLogin('/super-admin')">
           <div class="option-icon">👑</div>
           <h3>Super Admin</h3>
           <p>System administration and gym management</p>
@@ -18,7 +18,7 @@
           </div>
         </div>
 
-        <div class="login-option" @click="navigateToLogin('/gymadmin-login')">
+        <div class="login-option" @click="navigateToLogin('/gym-admin')">
           <div class="option-icon">🏢</div>
           <h3>Gym Admin</h3>
           <p>Gym operations and staff management</p>
@@ -29,7 +29,7 @@
           </div>
         </div>
 
-        <div class="login-option" @click="navigateToLogin('/trainer-login')">
+        <div class="login-option" @click="navigateToLogin('/trainer')">
           <div class="option-icon">🏋️</div>
           <h3>Trainer</h3>
           <p>Training services and client management</p>
@@ -65,7 +65,26 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 const navigateToLogin = (path) => {
-  router.push(path)
+  console.log('=== NAVIGATING TO LOGIN ===');
+  console.log('Path:', path);
+  console.log('Router:', router);
+  console.log('Router routes:', router.getRoutes());
+  
+  try {
+    // Test if router is working
+    console.log('Current route before navigation:', router.currentRoute.value);
+    
+    router.push(path).then(() => {
+      console.log('Navigation successful to:', path);
+      console.log('Current route after navigation:', router.currentRoute.value);
+    }).catch((error) => {
+      console.error('Navigation promise rejected:', error);
+    });
+    
+    console.log('Router.push called');
+  } catch (error) {
+    console.error('Navigation error:', error);
+  }
 }
 </script>
 

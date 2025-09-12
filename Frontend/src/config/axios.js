@@ -35,7 +35,10 @@ api.interceptors.response.use(
       localStorage.removeItem('user')
       localStorage.removeItem('role')
       localStorage.removeItem('gymId')
-      window.location.href = '/login-hub'
+      // Use router instead of window.location
+      import('../router').then(({ default: router }) => {
+        router.push('/login-hub')
+      })
     }
     return Promise.reject(error)
   }

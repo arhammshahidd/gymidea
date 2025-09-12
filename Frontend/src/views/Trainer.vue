@@ -24,44 +24,68 @@
         </div>
       </div>
 
+      <!-- Permissions Section -->
+      <div class="permissions-section">
+        <h2>Your Module Permissions</h2>
+        <div class="permissions-grid">
+          <div 
+            v-for="permission in authStore.user?.permissions || []" 
+            :key="permission" 
+            class="permission-card"
+          >
+            <h4>{{ permission }}</h4>
+            <span class="permission-status">✓ Enabled</span>
+          </div>
+          <div v-if="!authStore.user?.permissions?.length" class="no-permissions">
+            <p>No permissions assigned</p>
+          </div>
+        </div>
+      </div>
+
       <div class="content">
         <div class="section">
           <h2>Available Actions</h2>
           <div class="actions-grid">
-            <div v-if="hasPermission('users')" class="action-card">
+            <div v-if="hasPermission('User Management')" class="action-card">
               <h3>User Management</h3>
               <p>Manage gym members and their profiles</p>
               <button class="action-btn">Manage Users</button>
             </div>
             
-            <div v-if="hasPermission('classes')" class="action-card">
-              <h3>Class Management</h3>
-              <p>Create and manage fitness classes</p>
-              <button class="action-btn">Manage Classes</button>
+            <div v-if="hasPermission('Trainer Management')" class="action-card">
+              <h3>Trainer Management</h3>
+              <p>Manage other trainers and their schedules</p>
+              <button class="action-btn">Manage Trainers</button>
             </div>
             
-            <div v-if="hasPermission('schedule')" class="action-card">
+            <div v-if="hasPermission('Trainer Scheduler')" class="action-card">
               <h3>Schedule Management</h3>
               <p>Manage training schedules and appointments</p>
               <button class="action-btn">Manage Schedule</button>
             </div>
             
-            <div v-if="hasPermission('nutrition')" class="action-card">
+            <div v-if="hasPermission('Food Menu')" class="action-card">
               <h3>Nutrition Plans</h3>
               <p>Create and manage nutrition plans for members</p>
               <button class="action-btn">Manage Nutrition</button>
             </div>
             
-            <div v-if="hasPermission('equipment')" class="action-card">
-              <h3>Equipment Management</h3>
-              <p>Manage gym equipment and maintenance</p>
-              <button class="action-btn">Manage Equipment</button>
+            <div v-if="hasPermission('Dashboard')" class="action-card">
+              <h3>Dashboard</h3>
+              <p>View dashboard and overview information</p>
+              <button class="action-btn">View Dashboard</button>
             </div>
             
-            <div v-if="hasPermission('reports')" class="action-card">
-              <h3>Reports</h3>
-              <p>View training reports and analytics</p>
-              <button class="action-btn">View Reports</button>
+            <div v-if="hasPermission('Settings')" class="action-card">
+              <h3>Settings</h3>
+              <p>Manage trainer settings and preferences</p>
+              <button class="action-btn">Manage Settings</button>
+            </div>
+            
+            <div v-if="hasPermission('Payment Status')" class="action-card">
+              <h3>Payment Status</h3>
+              <p>View and manage payment information</p>
+              <button class="action-btn">View Payments</button>
             </div>
           </div>
         </div>
@@ -91,12 +115,25 @@
 <script setup>
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
+import { onMounted } from 'vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
 
+// Debug permissions
+onMounted(() => {
+  console.log('=== TRAINER COMPONENT DEBUG ===');
+  console.log('Auth store user:', authStore.user);
+  console.log('Auth store user permissions:', authStore.user?.permissions);
+  console.log('Auth store role:', authStore.role);
+  console.log('Auth store gymId:', authStore.gymId);
+  console.log('Auth store isAuthenticated:', authStore.isAuthenticated);
+});
+
 const hasPermission = (permission) => {
-  return authStore.user?.permissions?.includes(permission) || false
+  const hasIt = authStore.user?.permissions?.includes(permission) || false;
+  console.log(`Checking permission "${permission}":`, hasIt);
+  return hasIt;
 }
 
 const logout = () => {
@@ -171,6 +208,55 @@ const logout = () => {
 .content {
   display: grid;
   gap: 2rem;
+}
+
+.permissions-section {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 10px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  margin-bottom: 1.5rem;
+}
+
+.permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.permission-card {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  padding: 1rem;
+  border-radius: 8px;
+  text-align: center;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.permission-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.permission-card h4 {
+  margin: 0 0 0.5rem 0;
+  color: #333;
+  font-size: 1rem;
+}
+
+.permission-status {
+  color: #27ae60;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.no-permissions {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+  font-style: italic;
 }
 
 .section {

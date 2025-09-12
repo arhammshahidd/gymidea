@@ -69,9 +69,12 @@
               <input v-model="newTrainer.password" type="password" required />
             </div>
             <div class="form-group">
-              <label>Permissions:</label>
+              <label>Permissions (from your available modules):</label>
+              <div v-if="authStore.user?.permissions?.length" class="permissions-info">
+                <p class="permissions-note">You can assign any of your {{ authStore.user.permissions.length }} available modules to this trainer:</p>
+              </div>
               <div class="permissions">
-                <label v-for="permission in availablePermissions" :key="permission">
+                <label v-for="permission in authStore.user?.permissions || []" :key="permission">
                   <input 
                     type="checkbox" 
                     :value="permission" 
@@ -79,6 +82,9 @@
                   />
                   {{ permission }}
                 </label>
+                <div v-if="!authStore.user?.permissions?.length" class="no-permissions-available">
+                  <p>No permissions available to assign. Contact Super Admin.</p>
+                </div>
               </div>
             </div>
             <div class="form-actions">
@@ -139,14 +145,8 @@ const loading = ref(false)
 const showCreateTrainer = ref(false)
 const trainers = ref([])
 
-const availablePermissions = [
-  'users',
-  'classes',
-  'schedule',
-  'nutrition',
-  'equipment',
-  'reports'
-]
+// Permissions are now taken from the Gym Admin's own permissions
+// const availablePermissions = authStore.user?.permissions || []
 
 const newTrainer = ref({
   name: '',
@@ -169,8 +169,15 @@ const fetchTrainers = async () => {
 
 const createTrainer = async () => {
   loading.value = true
+  
+  console.log('=== CREATING TRAINER ===');
+  console.log('Trainer data:', newTrainer.value);
+  console.log('Gym Admin permissions:', authStore.user?.permissions);
+  console.log('Trainer permissions being assigned:', newTrainer.value.permissions);
+  
   const result = await gymStore.createTrainer(newTrainer.value)
   if (result.success) {
+    console.log('Trainer created successfully:', result.data);
     trainers.value.push(result.data)
     showCreateTrainer.value = false
     newTrainer.value = {
@@ -180,6 +187,8 @@ const createTrainer = async () => {
       password: '',
       permissions: []
     }
+  } else {
+    console.error('Failed to create trainer:', result.message);
   }
   loading.value = false
 }
@@ -382,6 +391,28 @@ const logout = () => {
   padding: 2rem;
   color: #666;
   font-style: italic;
+}
+
+.permissions-info {
+  margin-bottom: 0.5rem;
+}
+
+.permissions-note {
+  font-size: 0.9rem;
+  color: #666;
+  font-style: italic;
+  margin: 0;
+}
+
+.no-permissions-available {
+  text-align: center;
+  padding: 1rem;
+  color: #e74c3c;
+  font-style: italic;
+  background: #fdf2f2;
+  border: 1px solid #fecaca;
+  border-radius: 5px;
+  margin-top: 0.5rem;
 }
 
 .trainers-section {

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import axios from 'axios'
+import api from '../config/axios'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -20,7 +20,7 @@ export const useAuthStore = defineStore('auth', {
     // Super Admin Login
     async superAdminLogin(credentials) {
       try {
-        const response = await axios.post('http://localhost:5000/api/auth/superadmin/login', credentials)
+        const response = await api.post('/auth/superadmin/login', credentials)
         const { token, user } = response.data
         
         this.setAuth(token, user, 'SUPER_ADMIN')
@@ -36,7 +36,7 @@ export const useAuthStore = defineStore('auth', {
         console.log('=== FRONTEND GYM ADMIN LOGIN ===');
         console.log('Credentials:', credentials);
         
-        const response = await axios.post('http://localhost:5000/api/auth/gymadmin/login', credentials)
+        const response = await api.post('/auth/gymadmin/login', credentials)
         console.log('Login response:', response.data);
         
         const { token, admin } = response.data
@@ -60,7 +60,7 @@ export const useAuthStore = defineStore('auth', {
     // User Login
     async userLogin(credentials) {
       try {
-        const response = await axios.post('http://localhost:5000/api/auth/mobileuser/login', credentials)
+        const response = await api.post('/auth/mobileuser/login', credentials)
         const { token, user } = response.data
         
         this.setAuth(token, user, 'USER', user.gym_id)
@@ -73,12 +73,27 @@ export const useAuthStore = defineStore('auth', {
     // Trainer Login
     async trainerLogin(credentials) {
       try {
-        const response = await axios.post('http://localhost:5000/api/Trainer/login', credentials)
-        const { token, user } = response.data
+        console.log('=== FRONTEND TRAINER LOGIN ===');
+        console.log('Credentials:', credentials);
         
-        this.setAuth(token, user, 'TRAINER', user.gym_id)
+        const response = await api.post('/Trainer/login', credentials)
+        console.log('Trainer login response:', response.data);
+        
+        const { token, user } = response.data
+        console.log('Trainer user data:', user);
+        console.log('Trainer permissions:', user.permissions);
+        
+        this.setAuth(token, user, 'trainer', user.gym_id)
+        console.log('Auth store after trainer setAuth:', {
+          user: this.user,
+          role: this.role,
+          gymId: this.gymId,
+          isAuthenticated: this.isAuthenticated
+        });
+        
         return { success: true, data: response.data }
       } catch (error) {
+        console.error('Trainer login error:', error);
         return { success: false, message: error.response?.data?.message || 'Login failed' }
       }
     },
@@ -96,8 +111,7 @@ export const useAuthStore = defineStore('auth', {
       localStorage.setItem('role', role)
       if (gymId) localStorage.setItem('gymId', gymId)
       
-      // Set default axios header
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+      // Authorization header is handled by axios interceptor
     },
 
     // Logout
@@ -113,7 +127,7 @@ export const useAuthStore = defineStore('auth', {
       localStorage.removeItem('role')
       localStorage.removeItem('gymId')
       
-      delete axios.defaults.headers.common['Authorization']
+      // Authorization header is handled by axios interceptor
     },
 
     // Initialize auth from localStorage
@@ -130,7 +144,7 @@ export const useAuthStore = defineStore('auth', {
         this.gymId = gymId
         this.isAuthenticated = true
         
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`
+        // Authorization header is handled by axios interceptor
       }
     }
   }

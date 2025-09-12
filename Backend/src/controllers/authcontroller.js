@@ -125,30 +125,50 @@ exports.trainerLogin = async (req, res, next) => {
   try {
     const rawPhone = req.body.phone ?? req.body.contact_number;
     const { password } = req.body;
+    
+    console.log('=== TRAINER LOGIN ATTEMPT ===');
+    console.log('Phone:', rawPhone);
+    console.log('Password provided:', password ? '[PROVIDED]' : '[MISSING]');
+    
     const trainer = await db('trainers').where({ phone: rawPhone }).first();
+    console.log('Trainer found:', trainer ? 'YES' : 'NO');
+    
+    if (trainer) {
+      console.log('Trainer details:', {
+        id: trainer.id,
+        name: trainer.name,
+        phone: trainer.phone,
+        gym_id: trainer.gym_id,
+        permissions_raw: trainer.permissions
+      });
+    }
 
     if (!trainer) {
       return res.status(400).json({ success: false, message: 'Invalid credentials' });
     }
 
     const validPassword = await bcrypt.compare(password, trainer.password);
+    console.log('Password match:', validPassword ? 'YES' : 'NO');
+    
     if (!validPassword) {
       return res.status(400).json({ success: false, message: 'Invalid credentials' });
     }
 
     const token = jwt.signToken({
-      id: trainer.id,
-      gym_id: trainer.gym_id,
-      role: 'trainer',
-      permissions: trainer.permissions,
+        id: trainer.id,
+        gym_id: trainer.gym_id,
+        role: 'trainer',
+        permissions: trainer.permissions,
       token_version: trainer.token_version || 1
     }, '1d');
 
     const normalizedPermissions = typeof trainer.permissions === 'string'
       ? safeParseJSON(trainer.permissions, [])
       : (trainer.permissions ?? []);
+    
+    console.log('Normalized permissions:', normalizedPermissions);
 
-    res.json({
+    const responseData = {
       success: true,
       token,
       user: {
@@ -159,8 +179,12 @@ exports.trainerLogin = async (req, res, next) => {
         role: 'trainer',
         permissions: normalizedPermissions,
       },
-    });
+    };
+    
+    console.log('Trainer login response data:', responseData);
+    res.json(responseData);
   } catch (err) {
+    console.error('Trainer login error:', err);
     next(err);
   }
 };

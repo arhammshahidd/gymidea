@@ -101,7 +101,7 @@ const hasPermission = (permission) => {
 
 const logout = () => {
   authStore.logout()
-  router.push('/login')
+  router.push('/trainer-login')
 }
 </script>
 

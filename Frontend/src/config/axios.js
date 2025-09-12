@@ -35,7 +35,7 @@ api.interceptors.response.use(
       localStorage.removeItem('user')
       localStorage.removeItem('role')
       localStorage.removeItem('gymId')
-      window.location.href = '/login'
+      window.location.href = '/login-hub'
     }
     return Promise.reject(error)
   }

@@ -33,12 +33,26 @@ export const useAuthStore = defineStore('auth', {
     // Gym Admin Login
     async gymAdminLogin(credentials) {
       try {
+        console.log('=== FRONTEND GYM ADMIN LOGIN ===');
+        console.log('Credentials:', credentials);
+        
         const response = await axios.post('http://localhost:5000/api/auth/gymadmin/login', credentials)
+        console.log('Login response:', response.data);
+        
         const { token, admin } = response.data
+        console.log('Admin data from response:', admin);
+        console.log('Admin permissions:', admin.permissions);
         
         this.setAuth(token, admin, 'GYM_ADMIN', admin.gym_id)
+        console.log('Auth store after setAuth:', {
+          user: this.user,
+          role: this.role,
+          gymId: this.gymId
+        });
+        
         return { success: true, data: response.data }
       } catch (error) {
+        console.error('Gym admin login error:', error);
         return { success: false, message: error.response?.data?.message || 'Login failed' }
       }
     },

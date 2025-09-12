@@ -4,7 +4,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 
-const errorHandler = require('./middleware/errorHandler');
+const errorHandler = require('./middleware/errorhandler');
 
 const app = express();
 app.use(cors());

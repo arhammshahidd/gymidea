@@ -18,46 +18,59 @@
       </div>
 
       <div class="actions">
-        <button @click="showCreateGym = true" class="action-btn">Create New Gym</button>
+        <button @click="showAddGymAdmin = true" class="action-btn">Create Gym Admin</button>
         <button @click="fetchGymAdmins" class="action-btn">Refresh Data</button>
       </div>
 
-      <!-- Create Gym Modal -->
-      <div v-if="showCreateGym" class="modal">
+      <!-- Create Gym Admin Modal -->
+      <div v-if="showAddGymAdmin" class="modal">
         <div class="modal-content">
-          <h3>Create New Gym</h3>
-          <form @submit.prevent="createGym">
+          <h3>Create Gym Admin</h3>
+          <form @submit.prevent="createGymAdmin">
             <div class="form-group">
               <label>Gym Name:</label>
-              <input v-model="newGym.name" type="text" required />
+              <input v-model="newGymAdmin.gym_name" type="text" required />
             </div>
             <div class="form-group">
-              <label>Contact Number:</label>
-              <input v-model="newGym.contact_number" type="text" required />
+              <label>Gym Contact Number:</label>
+              <input v-model="newGymAdmin.gym_contact" type="text" required />
             </div>
             <div class="form-group">
-              <label>Email:</label>
-              <input v-model="newGym.email" type="email" required />
+              <label>Gym Email:</label>
+              <input v-model="newGymAdmin.gym_email" type="email" required />
             </div>
             <div class="form-group">
               <label>Admin Name:</label>
-              <input v-model="newGym.admin.name" type="text" required />
+              <input v-model="newGymAdmin.name" type="text" required />
             </div>
             <div class="form-group">
               <label>Admin Phone:</label>
-              <input v-model="newGym.admin.phone" type="text" required />
+              <input v-model="newGymAdmin.phone" type="text" required />
             </div>
             <div class="form-group">
               <label>Admin Email:</label>
-              <input v-model="newGym.admin.email" type="email" required />
+              <input v-model="newGymAdmin.email" type="email" required />
             </div>
             <div class="form-group">
               <label>Admin Password:</label>
-              <input v-model="newGym.admin.password" type="password" required />
+              <input v-model="newGymAdmin.password" type="password" required />
+            </div>
+            <div class="form-group">
+              <label>Permissions:</label>
+              <div class="permissions">
+                <label v-for="permission in availablePermissions" :key="permission">
+                  <input 
+                    type="checkbox" 
+                    :value="permission" 
+                    v-model="newGymAdmin.permissions"
+                  />
+                  {{ permission }}
+                </label>
+              </div>
             </div>
             <div class="form-actions">
-              <button type="submit" :disabled="loading">Create Gym</button>
-              <button type="button" @click="showCreateGym = false">Cancel</button>
+              <button type="submit" :disabled="loading">Create Gym Admin</button>
+              <button type="button" @click="showAddGymAdmin = false">Cancel</button>
             </div>
           </form>
         </div>
@@ -70,8 +83,9 @@
         <div v-else class="gyms-grid">
           <div v-for="gym in gyms" :key="gym.id" class="gym-card">
             <h3>{{ gym.name }}</h3>
-            <p>Contact: {{ gym.contact_number }}</p>
             <p>Email: {{ gym.email }}</p>
+            <p>Contact: {{ gym.contact_number }}</p>
+            <p>Created: {{ new Date(gym.created_at).toLocaleDateString() }}</p>
             <div class="gym-actions">
               <button @click="editGym(gym)" class="btn-small">Edit</button>
               <button @click="deleteGym(gym.id)" class="btn-small danger">Delete</button>
@@ -169,20 +183,19 @@ const gymStore = useGymStore()
 const router = useRouter()
 
 const loading = ref(false)
-const showCreateGym = ref(false)
+const showAddGymAdmin = ref(false)
 const gyms = ref([])
 const gymAdmins = ref([])
 
-const newGym = ref({
+const newGymAdmin = ref({
+  gym_name: '',
+  gym_contact: '',
+  gym_email: '',
   name: '',
-  contact_number: '',
+  phone: '',
   email: '',
-  admin: {
-    name: '',
-    phone: '',
-    email: '',
-    password: ''
-  }
+  password: '',
+  permissions: []
 })
 
 onMounted(() => {
@@ -204,41 +217,55 @@ const fetchGymAdmins = async () => {
   }
 }
 
-const createGym = async () => {
+const createGymAdmin = async () => {
   loading.value = true
-  const result = await gymStore.createGym(newGym.value)
-  if (result.success) {
-    gyms.value.push(result.data.gym)
-    gymAdmins.value.push(result.data.gymAdmin)
-    showCreateGym.value = false
-    newGym.value = {
-      name: '',
-      contact_number: '',
-      email: '',
-      admin: {
+  try {
+    console.log('Creating gym admin with data:', newGymAdmin.value)
+    console.log('Permissions being sent:', newGymAdmin.value.permissions)
+    console.log('Permissions type:', typeof newGymAdmin.value.permissions)
+    console.log('Permissions length:', newGymAdmin.value.permissions ? newGymAdmin.value.permissions.length : 'undefined')
+    
+    // Validate required fields
+    if (!newGymAdmin.value.gym_name || !newGymAdmin.value.gym_contact || !newGymAdmin.value.gym_email || 
+        !newGymAdmin.value.name || !newGymAdmin.value.phone || !newGymAdmin.value.email || 
+        !newGymAdmin.value.password) {
+      alert('Please fill in all required fields')
+      return
+    }
+    
+    const result = await gymStore.createGym(newGymAdmin.value)
+    console.log('Result:', result)
+    
+    if (result.success) {
+      // Add the new gym admin to the list
+      gymAdmins.value.push(result.data.gymAdmin)
+      // Refresh the gym admins list to get the latest data
+      await fetchGymAdmins()
+      showAddGymAdmin.value = false
+      alert('Gym Admin created successfully!')
+      newGymAdmin.value = {
+        gym_name: '',
+        gym_contact: '',
+        gym_email: '',
         name: '',
         phone: '',
         email: '',
-        password: ''
+        password: '',
+        permissions: []
       }
+    } else {
+      console.error('Failed to create gym admin:', result.message)
+      alert('Failed to create gym admin: ' + result.message)
     }
-  }
-  loading.value = false
-}
-
-const editGym = (gym) => {
-  // TODO: Implement edit gym functionality
-  console.log('Edit gym:', gym)
-}
-
-const deleteGym = async (id) => {
-  if (confirm('Are you sure you want to delete this gym?')) {
-    const result = await gymStore.deleteGym(id)
-    if (result.success) {
-      gyms.value = gyms.value.filter(gym => gym.id !== id)
-    }
+  } catch (error) {
+    console.error('Error creating gym admin:', error)
+    const errorMessage = error.response?.data?.message || error.message || 'Unknown error occurred'
+    alert('Error: ' + errorMessage)
+  } finally {
+    loading.value = false
   }
 }
+
 
 const showEditModal = ref(false)
 const editForm = ref({
@@ -351,9 +378,26 @@ const deleteAdmin = async (id) => {
   }
 }
 
+// Gym management functions
+const editGym = (gym) => {
+  // TODO: Implement gym editing functionality
+  alert('Gym editing functionality will be implemented')
+}
+
+const deleteGym = async (id) => {
+  if (confirm('Are you sure you want to delete this gym? This will also delete all associated gym admins and trainers.')) {
+    const result = await gymStore.deleteGym(id)
+    if (result.success) {
+      gyms.value = gyms.value.filter(gym => gym.id !== id)
+      // Also refresh gym admins since some might be deleted
+      await fetchGymAdmins()
+    }
+  }
+}
+
 const logout = () => {
   authStore.logout()
-  router.push('/login')
+  router.push('/superadmin-login')
 }
 </script>
 

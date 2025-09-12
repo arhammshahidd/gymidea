@@ -18,6 +18,28 @@
           <h3>Gym ID</h3>
           <p>{{ authStore.gymId }}</p>
         </div>
+        <div class="stat-card">
+          <h3>Your Permissions</h3>
+          <p>{{ authStore.user?.permissions?.length || 0 }} modules</p>
+        </div>
+      </div>
+
+      <!-- Permissions Section -->
+      <div class="permissions-section">
+        <h2>Your Module Permissions</h2>
+        <div class="permissions-grid">
+          <div 
+            v-for="permission in authStore.user?.permissions || []" 
+            :key="permission" 
+            class="permission-card"
+          >
+            <h4>{{ permission }}</h4>
+            <span class="permission-status">✓ Enabled</span>
+          </div>
+          <div v-if="!authStore.user?.permissions?.length" class="no-permissions">
+            <p>No permissions assigned</p>
+          </div>
+        </div>
       </div>
 
       <div class="actions">
@@ -106,6 +128,13 @@ const authStore = useAuthStore()
 const gymStore = useGymStore()
 const router = useRouter()
 
+// Debug permissions
+console.log('=== GYM ADMIN COMPONENT DEBUG ===');
+console.log('Auth store user:', authStore.user);
+console.log('Auth store user permissions:', authStore.user?.permissions);
+console.log('Auth store role:', authStore.role);
+console.log('Auth store gymId:', authStore.gymId);
+
 const loading = ref(false)
 const showCreateTrainer = ref(false)
 const trainers = ref([])
@@ -171,7 +200,7 @@ const deleteTrainer = async (id) => {
 
 const logout = () => {
   authStore.logout()
-  router.push('/login')
+  router.push('/gymadmin-login')
 }
 </script>
 
@@ -310,6 +339,49 @@ const logout = () => {
 .form-actions button[type="submit"] {
   background: #27ae60;
   color: white;
+}
+
+.permissions-section {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 10px;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.permissions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.permission-card {
+  border: 2px solid #27ae60;
+  padding: 1rem;
+  border-radius: 8px;
+  background: #f8fff8;
+  text-align: center;
+}
+
+.permission-card h4 {
+  margin: 0 0 0.5rem 0;
+  color: #27ae60;
+  font-size: 1rem;
+}
+
+.permission-status {
+  color: #27ae60;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.no-permissions {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+  font-style: italic;
 }
 
 .trainers-section {

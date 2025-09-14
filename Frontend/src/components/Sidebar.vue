@@ -40,51 +40,69 @@ const authStore = useAuthStore()
 const drawerOpen = ref(true)
 const currentModule = ref('')
 
-// Menu items configuration
-const menuItems = ref([
+// All possible menu items
+const allMenuItems = ref([
   {
     key: 'dashboard',
     label: 'Dashboard',
     icon: '📊',
-    route: '/gym-admin/dashboard'
+    route: '/gym-admin/dashboard',
+    permission: 'Dashboard'
   },
   {
     key: 'user-management',
     label: 'User Management',
     icon: '👥',
-    route: '/gym-admin/user-management'
+    route: '/gym-admin/user-management',
+    permission: 'User Management'
   },
   {
     key: 'trainer-management',
     label: 'Trainer Management',
     icon: '🏋️‍♂️',
-    route: '/gym-admin/trainer-management'
+    route: '/gym-admin/trainer-management',
+    permission: 'Trainer Management'
   },
   {
     key: 'payment-status',
     label: 'Payment Status',
     icon: '📄',
-    route: '/gym-admin/payment-status'
+    route: '/gym-admin/payment-status',
+    permission: 'Payment Status'
   },
   {
     key: 'food-menu',
     label: 'Food Menus',
     icon: '🍽️',
-    route: '/gym-admin/food-menu'
+    route: '/gym-admin/food-menu',
+    permission: 'Food Menu'
   },
   {
     key: 'trainer-scheduler',
     label: 'Stats & Training Schedules',
     icon: '📊',
-    route: '/gym-admin/trainer-scheduler'
+    route: '/gym-admin/trainer-scheduler',
+    permission: 'Trainer Scheduler'
   },
   {
     key: 'settings',
     label: 'Settings',
     icon: '⚙️',
-    route: '/gym-admin/settings'
+    route: '/gym-admin/settings',
+    permission: 'Settings'
   }
 ])
+
+// Computed menu items based on permissions
+const menuItems = computed(() => {
+  if (!authStore.user || !authStore.user.permissions) {
+    return []
+  }
+  
+  return allMenuItems.value.filter(item => 
+    authStore.user.permissions.includes(item.permission)
+  )
+})
 
 // Set current module based on route
 const setCurrentModuleFromRoute = () => {
@@ -101,7 +119,16 @@ const setCurrentModuleFromRoute = () => {
 
 // Navigate to route
 const navigateTo = (route) => {
-  router.push(route)
+  console.log('=== SIDEBAR NAVIGATION ===')
+  console.log('Navigating to route:', route)
+  console.log('Current route:', router.currentRoute.value.path)
+  
+  try {
+    router.push(route)
+    console.log('Navigation successful')
+  } catch (error) {
+    console.error('Navigation error:', error)
+  }
 }
 
 // Logout function
@@ -125,6 +152,12 @@ const logout = () => {
 }
 
 onMounted(() => {
+  console.log('=== SIDEBAR MOUNTED ===')
+  console.log('Auth store user:', authStore.user)
+  console.log('User permissions:', authStore.user?.permissions)
+  console.log('Menu items:', menuItems.value)
+  console.log('Current route:', route.path)
+  
   setCurrentModuleFromRoute()
 })
 </script>

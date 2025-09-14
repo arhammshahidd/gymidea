@@ -5,17 +5,19 @@
     
     <!-- Main Content Area -->
     <div class="main-content">
-      <router-view />
+      <router-view :key="$route.fullPath" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
+import { useRoute } from 'vue-router'
 import Sidebar from '../components/Sidebar.vue'
 
 const authStore = useAuthStore()
+const route = useRoute()
 
 onMounted(() => {
   console.log('=== GYM ADMIN COMPONENT MOUNTED ===')
@@ -26,7 +28,17 @@ onMounted(() => {
     role: authStore.role,
     user: authStore.user?.name
   })
+  console.log('User permissions:', authStore.user?.permissions)
 })
+
+// Watch for route changes
+watch(() => route.path, (newPath, oldPath) => {
+  console.log('=== ROUTE CHANGED ===')
+  console.log('From:', oldPath)
+  console.log('To:', newPath)
+  console.log('Route params:', route.params)
+  console.log('Route query:', route.query)
+}, { immediate: true })
 </script>
 
 <style scoped>

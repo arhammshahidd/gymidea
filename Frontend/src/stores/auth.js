@@ -13,7 +13,46 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isLoggedIn: (state) => !!state.token,
     userRole: (state) => state.role,
-    currentGymId: (state) => state.gymId
+    currentGymId: (state) => state.gymId,
+    hasPermission: (state) => (permission) => {
+      if (!state.user || !state.user.permissions) return false
+      return state.user.permissions.includes(permission)
+    },
+    getFirstAvailableModule: (state) => {
+      console.log('=== GET FIRST AVAILABLE MODULE ===')
+      console.log('User:', state.user)
+      console.log('Permissions:', state.user?.permissions)
+      console.log('Permission type:', typeof state.user?.permissions)
+      
+      if (!state.user || !state.user.permissions) {
+        console.log('No user or permissions found')
+        return null
+      }
+      
+      const moduleRoutes = {
+        'Dashboard': '/gym-admin/dashboard',
+        'User Management': '/gym-admin/user-management',
+        'Trainer Management': '/gym-admin/trainer-management',
+        'Payment Status': '/gym-admin/payment-status',
+        'Food Menu': '/gym-admin/food-menu',
+        'Trainer Scheduler': '/gym-admin/trainer-scheduler',
+        'Settings': '/gym-admin/settings'
+      }
+      
+      console.log('Checking permissions against routes:', moduleRoutes)
+      
+      // Find first available module
+      for (const [permission, route] of Object.entries(moduleRoutes)) {
+        console.log(`Checking permission: "${permission}" in permissions:`, state.user.permissions)
+        if (state.user.permissions.includes(permission)) {
+          console.log(`Found match! Redirecting to: ${route}`)
+          return route
+        }
+      }
+      
+      console.log('No matching permissions found')
+      return null
+    }
   },
 
   actions: {

@@ -49,6 +49,7 @@
         <table>
           <thead>
             <tr>
+              <th>User ID</th>
               <th>Name</th>
               <th>Email</th>
               <th>Phone</th>
@@ -60,6 +61,9 @@
           </thead>
           <tbody>
             <tr v-for="user in userStore.users" :key="user.id">
+              <td class="user-id-cell">
+                <span class="user-id-badge">#{{ user.id }}</span>
+              </td>
               <td>{{ user.name }}</td>
               <td>{{ user.email }}</td>
               <td>{{ user.phone }}</td>
@@ -322,6 +326,21 @@ th {
   color: #333;
 }
 
+.user-id-cell {
+  width: 80px;
+  text-align: center;
+}
+
+.user-id-badge {
+  background: #e9ecef;
+  color: #495057;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: 'Courier New', monospace;
+}
+
 .status-badge, .membership-badge {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
@@ -476,5 +495,54 @@ th {
 .loading {
   color: #007bff;
   font-weight: 500;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .users-table {
+    font-size: 0.9rem;
+  }
+  
+  .user-id-cell {
+    width: 60px;
+  }
+  
+  .user-id-badge {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+  }
+  
+  th, td {
+    padding: 0.5rem 0.25rem;
+  }
+  
+  .actions {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  
+  .btn-small {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .users-table {
+    font-size: 0.8rem;
+  }
+  
+  .user-id-cell {
+    width: 50px;
+  }
+  
+  .user-id-badge {
+    font-size: 0.6rem;
+    padding: 0.15rem 0.3rem;
+  }
+  
+  th, td {
+    padding: 0.4rem 0.2rem;
+  }
 }
 </style>

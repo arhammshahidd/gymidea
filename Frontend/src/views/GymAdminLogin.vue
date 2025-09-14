@@ -55,7 +55,80 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+// import { ref } from 'vue'
+// import { useAuthStore } from '../stores/auth'
+// import { useRouter } from 'vue-router'
+
+// const authStore = useAuthStore()
+// const router = useRouter()
+
+// const loading = ref(false)
+
+// // Direct navigation after login - no watcher needed
+// const error = ref('')
+// const success = ref('')
+
+// const credentials = ref({
+//   phone: '',
+//   password: ''
+// })
+
+// const handleLogin = async () => {
+//   loading.value = true
+//   error.value = ''
+//   success.value = ''
+
+//   try {
+//     const result = await authStore.gymAdminLogin(credentials.value)
+
+//     if (result.success) {
+//       success.value = 'Login successful! Redirecting...'
+//       console.log('=== LOGIN SUCCESS - TRIGGERING NAVIGATION ===')
+//       console.log('Auth state:', {
+//         isAuthenticated: authStore.isAuthenticated,
+//         role: authStore.role,
+//         user: authStore.user?.name
+//       })
+      
+//       // 🔑 Navigate to gym admin dashboard after ensuring auth state is set
+//       console.log('=== NAVIGATING TO GYM ADMIN DASHBOARD ===')
+//       console.log('Current route:', router.currentRoute.value.path)
+//       console.log('Auth state before navigation:', {
+//         isAuthenticated: authStore.isAuthenticated,
+//         role: authStore.role,
+//         user: authStore.user?.name,
+//         token: !!authStore.token
+//       })
+      
+//       // Longer delay to ensure auth state is fully updated
+//       setTimeout(() => {
+//         console.log('Navigating to /gym-admin/dashboard with router.push')
+//         console.log('Current route before push:', router.currentRoute.value.path)
+//         console.log('Auth state before navigation:', {
+//           isAuthenticated: authStore.isAuthenticated,
+//           role: authStore.role,
+//           user: authStore.user?.name,
+//           token: !!authStore.token
+//         })
+        
+//         // Navigate directly to dashboard
+//         router.push('/gym-admin/dashboard').then(() => {
+//           console.log('Navigation completed, new route:', router.currentRoute.value.path)
+//         }).catch((error) => {
+//           console.error('Navigation failed:', error)
+//         })
+//       }, 200)
+//     } else {
+//       error.value = result.message
+//     }
+//   } catch (err) {
+//     error.value = 'Login failed. Please try again.'
+//   } finally {
+//     loading.value = false
+//   }
+// }
+
+import { ref, watchEffect } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
 
@@ -63,14 +136,25 @@ const authStore = useAuthStore()
 const router = useRouter()
 
 const loading = ref(false)
-
-// Direct navigation after login - no watcher needed
 const error = ref('')
 const success = ref('')
 
 const credentials = ref({
   phone: '',
   password: ''
+})
+
+// ✅ Extra Guard inside component
+watchEffect(() => {
+  if (authStore.isAuthenticated && authStore.role === 'GYM_ADMIN') {
+    const firstAvailableModule = authStore.getFirstAvailableModule
+    if (firstAvailableModule) {
+      router.replace(firstAvailableModule)
+    } else {
+      // If no permissions, redirect to no-permissions page
+      router.replace('/gym-admin/no-permissions')
+    }
+  }
 })
 
 const handleLogin = async () => {
@@ -83,40 +167,24 @@ const handleLogin = async () => {
 
     if (result.success) {
       success.value = 'Login successful! Redirecting...'
-      console.log('=== LOGIN SUCCESS - TRIGGERING NAVIGATION ===')
-      console.log('Auth state:', {
-        isAuthenticated: authStore.isAuthenticated,
-        role: authStore.role,
-        user: authStore.user?.name
-      })
       
-      // 🔑 Navigate to gym admin dashboard after ensuring auth state is set
-      console.log('=== NAVIGATING TO GYM ADMIN DASHBOARD ===')
-      console.log('Current route:', router.currentRoute.value.path)
-      console.log('Auth state before navigation:', {
-        isAuthenticated: authStore.isAuthenticated,
-        role: authStore.role,
-        user: authStore.user?.name,
-        token: !!authStore.token
-      })
-      
-      // Longer delay to ensure auth state is fully updated
+      // Wait for auth state to be updated
       setTimeout(() => {
-        console.log('Navigating to /gym-admin/dashboard with router.push')
-        console.log('Current route before push:', router.currentRoute.value.path)
-        console.log('Auth state before navigation:', {
-          isAuthenticated: authStore.isAuthenticated,
-          role: authStore.role,
-          user: authStore.user?.name,
-          token: !!authStore.token
-        })
+        console.log('=== PERMISSION CHECK ===')
+        console.log('User permissions:', authStore.user?.permissions)
+        console.log('Permission type:', typeof authStore.user?.permissions)
+        console.log('Is array:', Array.isArray(authStore.user?.permissions))
         
-        // Navigate directly to dashboard
-        router.push('/gym-admin/dashboard').then(() => {
-          console.log('Navigation completed, new route:', router.currentRoute.value.path)
-        }).catch((error) => {
-          console.error('Navigation failed:', error)
-        })
+        const firstAvailableModule = authStore.getFirstAvailableModule
+        console.log('First available module:', firstAvailableModule)
+        
+        if (firstAvailableModule) {
+          console.log('Redirecting to first available module:', firstAvailableModule)
+          router.push(firstAvailableModule)
+        } else {
+          console.log('No permissions available, redirecting to no-permissions page')
+          router.push('/gym-admin/no-permissions')
+        }
       }, 200)
     } else {
       error.value = result.message
@@ -127,6 +195,8 @@ const handleLogin = async () => {
     loading.value = false
   }
 }
+
+
 </script>
 
 <style scoped>

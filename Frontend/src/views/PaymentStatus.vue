@@ -8,7 +8,7 @@
       <div class="header-actions">
         <q-input
           v-model="searchQuery"
-          placeholder="Search by ID, Name, Email..."
+          placeholder="Search by ID, Name, Email, Phone..."
           outlined
           dense
           clearable
@@ -29,10 +29,10 @@
         <div class="col-6 col-sm-4 col-md-2 col-lg-2">
           <q-card class="overview-card total-users">
             <q-card-section class="text-center">
-              <q-avatar size="60px" color="primary" class="q-mb-sm">
-                <q-icon name="people" size="30px" color="white" />
+              <q-avatar size="40px" color="primary" class="q-mb-sm">
+                <q-icon name="people" size="20px" color="white" />
               </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ overviewData.totalMembers || 0 }}</div>
+              <div class="text-h6 text-weight-bold">{{ computedOverviewData.totalMembers || 0 }}</div>
               <div class="text-caption text-grey-6">Total Users</div>
             </q-card-section>
           </q-card>
@@ -42,10 +42,10 @@
         <div class="col-6 col-sm-4 col-md-2 col-lg-2">
           <q-card class="overview-card active-users">
             <q-card-section class="text-center">
-              <q-avatar size="60px" color="positive" class="q-mb-sm">
-                <q-icon name="person_check" size="30px" color="white" />
+              <q-avatar size="40px" color="positive" class="q-mb-sm">
+                <q-icon name="person_check" size="20px" color="white" />
               </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ overviewData.activeMembers || 0 }}</div>
+              <div class="text-h6 text-weight-bold">{{ computedOverviewData.activeMembers || 0 }}</div>
               <div class="text-caption text-grey-6">Active Users</div>
             </q-card-section>
           </q-card>
@@ -55,10 +55,10 @@
         <div class="col-6 col-sm-4 col-md-2 col-lg-2">
           <q-card class="overview-card paid-users">
             <q-card-section class="text-center">
-              <q-avatar size="60px" color="green" class="q-mb-sm">
-                <q-icon name="attach_money" size="30px" color="white" />
+              <q-avatar size="40px" color="green" class="q-mb-sm">
+                <q-icon name="attach_money" size="20px" color="white" />
               </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ overviewData.paidMembers || 0 }}</div>
+              <div class="text-h6 text-weight-bold">{{ computedOverviewData.paidMembers || 0 }}</div>
               <div class="text-caption text-grey-6">Paid Users</div>
             </q-card-section>
           </q-card>
@@ -68,10 +68,10 @@
         <div class="col-6 col-sm-4 col-md-2 col-lg-2">
           <q-card class="overview-card unpaid-users">
             <q-card-section class="text-center">
-              <q-avatar size="60px" color="warning" class="q-mb-sm">
-                <q-icon name="money_off" size="30px" color="white" />
+              <q-avatar size="40px" color="warning" class="q-mb-sm">
+                <q-icon name="money_off" size="20px" color="white" />
               </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ overviewData.unpaidMembers || 0 }}</div>
+              <div class="text-h6 text-weight-bold">{{ computedOverviewData.unpaidMembers || 0 }}</div>
               <div class="text-caption text-grey-6">Unpaid Users</div>
             </q-card-section>
           </q-card>
@@ -81,11 +81,24 @@
         <div class="col-6 col-sm-4 col-md-2 col-lg-2">
           <q-card class="overview-card inactive-users">
             <q-card-section class="text-center">
-              <q-avatar size="60px" color="negative" class="q-mb-sm">
-                <q-icon name="person_off" size="30px" color="white" />
+              <q-avatar size="40px" color="negative" class="q-mb-sm">
+                <q-icon name="person_off" size="20px" color="white" />
               </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ (overviewData.totalMembers || 0) - (overviewData.activeMembers || 0) }}</div>
+              <div class="text-h6 text-weight-bold">{{ (computedOverviewData.totalMembers || 0) - (computedOverviewData.activeMembers || 0) }}</div>
               <div class="text-caption text-grey-6">Inactive Users</div>
+            </q-card-section>
+          </q-card>
+        </div>
+
+        <!-- Total Amount Card -->
+        <div class="col-6 col-sm-4 col-md-2 col-lg-2">
+          <q-card class="overview-card  total-amount">
+            <q-card-section class="text-center">
+              <q-avatar size="40px" color="purple" class="q-mb-sm">
+                <q-icon name="account_balance_wallet" size="20px" color="white" />
+              </q-avatar>
+              <div class="text-h6 text-weight-bold">PKR{{ totalAmount || 0 }}</div>
+              <div class="text-caption text-grey-6">Total Amount</div>
             </q-card-section>
           </q-card>
         </div>
@@ -131,17 +144,7 @@
             size="md"
           />
         </div>
-        <div class="col-12 col-sm-12 col-md-3">
-          <q-btn 
-            @click="debugPaymentData" 
-            color="orange" 
-            icon="bug_report" 
-            label="Debug Data" 
-            unelevated
-            class="full-width"
-            size="md"
-          />
-        </div>
+        
       </div>
     </div>
 
@@ -160,7 +163,7 @@
       <div v-else>
         <!-- Debug Info -->
         <div class="q-mb-md text-caption text-grey-6">
-          Showing {{ filteredUserCards.length }} user cards
+          Showing Users {{ filteredUserCards.length }}
         </div>
         
         <!-- Responsive Grid Layout -->
@@ -168,21 +171,20 @@
           <template v-for="(card, index) in filteredUserCards" :key="card?.id || index">
             <div 
               v-if="card && card.id"
-              class="col-12 col-sm-6 col-md-4 col-lg-3"
+              class="col-12 col-sm-6 col-md-6 col-lg-4"
             >
               <q-card class="user-card full-height">
                 <q-card-section class="user-card-header">
                   <div class="text-h6 text-primary">#{{ card.id || 'N/A' }}</div>
                   <div class="text-subtitle1 text-weight-medium">{{ card.name || 'N/A' }}</div>
-                  <div class="text-caption text-grey-6">{{ card.email || 'N/A' }}</div>
-                  <div class="text-caption text-grey-6">{{ card.phone || 'N/A' }}</div>
+                  <div class="text-caption text-grey-6">Email: {{ card.email || 'N/A' }}</div>
+                  <div class="text-caption text-grey-6">Contact: {{ card.phone || 'N/A' }}</div>
                   
                 </q-card-section>
                 
                 <q-card-section class="user-card-body">
                   <div class="row items-center q-mb-sm">
-                    <q-icon name="attach_money" size="20px" color="green" class="q-mr-sm" />
-                    <span class="text-h6 text-weight-bold">${{ card.totalAmount || 0 }}</span>
+                    <span class="text-h6 text-weight-bold">Total Received: PKR{{ card.totalAmount || 0 }}</span>
                   </div>
                   
                   <!-- Last Payment Information -->
@@ -190,7 +192,7 @@
                     <div class="text-caption text-grey-6">Last Payment:</div>
                     <div class="row items-center">
                       <q-icon name="payment" size="16px" color="blue" class="q-mr-xs" />
-                      <span class="text-subtitle2 text-weight-medium">${{ card.lastPaymentAmount || 0 }}</span>
+                      <span class="text-subtitle2 text-weight-medium">PKR{{ card.lastPaymentAmount || 0 }}/month</span>
                     </div>
                     <div class="text-caption" :class="isOverdue(card.lastPaymentDueDate) ? 'text-red-6' : 'text-grey-6'">
                       Due: {{ formatDate(card.lastPaymentDueDate) }}
@@ -537,6 +539,36 @@ const userOptions = computed(() => {
   }))
 })
 
+const totalAmount = computed(() => {
+  if (!userCards.value || userCards.value.length === 0) return 0
+  return userCards.value.reduce((total, card) => {
+    return total + (card.totalAmount || 0)
+  }, 0)
+})
+
+const computedOverviewData = computed(() => {
+  if (!userCards.value || userCards.value.length === 0) {
+    return {
+      totalMembers: 0,
+      activeMembers: 0,
+      paidMembers: 0,
+      unpaidMembers: 0
+    }
+  }
+  
+  const totalMembers = userCards.value.length
+  const activeMembers = userCards.value.filter(card => card.status === 'Active').length
+  const paidMembers = userCards.value.filter(card => card.paymentStatus === 'Paid').length
+  const unpaidMembers = userCards.value.filter(card => card.paymentStatus === 'Unpaid').length
+  
+  return {
+    totalMembers,
+    activeMembers,
+    paidMembers,
+    unpaidMembers
+  }
+})
+
 const filteredUserCards = computed(() => {
   try {
     console.log('=== FILTERING USER CARDS ===')
@@ -562,12 +594,15 @@ const filteredUserCards = computed(() => {
     // Search filter
     if (searchQuery.value && typeof searchQuery.value === 'string') {
       const query = searchQuery.value.toLowerCase()
+      const digitQuery = searchQuery.value.replace(/\D/g, '')
       console.log('Applying search filter:', query)
       filtered = filtered.filter(card => 
         card && (
           card.id?.toString().includes(query) ||
           card.name?.toLowerCase().includes(query) ||
-          card.email?.toLowerCase().includes(query)
+          card.email?.toLowerCase().includes(query) ||
+          card.phone?.toLowerCase().includes(query) ||
+          (digitQuery && card.phone && card.phone.replace(/\D/g, '').includes(digitQuery))
         )
       )
       console.log('After search filter:', filtered.length)
@@ -749,9 +784,9 @@ const createUserCards = async () => {
     // After processing all payments, determine payment status and last payment for each user
     cardMap.forEach((card, userId) => {
       if (card.payments.length > 0) {
-        // Check if all payments are paid
-        const allPaid = card.payments.every(payment => payment.payment_status === 'Paid')
-        card.paymentStatus = allPaid ? 'Paid' : 'Unpaid'
+        // Check if user has at least one paid payment (not all payments need to be paid)
+        const hasPaidPayment = card.payments.some(payment => payment.payment_status === 'Paid')
+        card.paymentStatus = hasPaidPayment ? 'Paid' : 'Unpaid'
         
         // Get the last payment (most recent by created_at)
         const sortedPayments = [...card.payments].sort((a, b) => 
@@ -915,70 +950,7 @@ const refreshData = async () => {
   await createUserCards()
 }
 
-const debugPaymentData = async () => {
-  console.log('=== DEBUGGING PAYMENT DATA ===')
-  
-  // Debug 1: Check current payment records
-  console.log('1. Current paymentRecords.value:', paymentRecords.value)
-  console.log('2. PaymentRecords length:', paymentRecords.value?.length)
-  console.log('3. PaymentRecords type:', typeof paymentRecords.value)
-  
-  // Debug 2: Fetch fresh payment data
-  console.log('4. Fetching fresh payment data...')
-  const freshPayments = await paymentStatusStore.getPayments({ limit: 1000 })
-  console.log('5. Fresh payments response:', freshPayments)
-  
-  // Debug 2.1: Check if we have payments for user 2
-  if (freshPayments.success && freshPayments.data) {
-    const user2Payments = freshPayments.data.filter(p => p.user_id === 2)
-    console.log('5.1. Payments for user 2:', user2Payments)
-    console.log('5.2. User 2 payments count:', user2Payments.length)
-    if (user2Payments.length > 0) {
-      const totalForUser2 = user2Payments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0)
-      console.log('5.3. Total amount for user 2 should be:', totalForUser2)
-    }
-  }
-  
-  // Debug 3: Check user cards
-  console.log('6. Current userCards.value:', userCards.value)
-  console.log('7. UserCards length:', userCards.value?.length)
-  
-  // Debug 4: Check specific user card for user ID 2
-  const user2Card = userCards.value.find(card => card.id === 2)
-  console.log('8. User 2 card:', user2Card)
-  if (user2Card) {
-    console.log('9. User 2 totalAmount:', user2Card.totalAmount)
-    console.log('10. User 2 payments:', user2Card.payments)
-    console.log('11. User 2 payments length:', user2Card.payments?.length)
-  }
-  
-  // Debug 5: Force recreate user cards
-  console.log('12. Force recreating user cards...')
-  await createUserCards()
-  
-  // Debug 6: Check user cards after recreation
-  const user2CardAfter = userCards.value.find(card => card.id === 2)
-  console.log('13. User 2 card after recreation:', user2CardAfter)
-  if (user2CardAfter) {
-    console.log('14. User 2 totalAmount after recreation:', user2CardAfter.totalAmount)
-    console.log('15. User 2 payments after recreation:', user2CardAfter.payments)
-  }
-  
-  // Debug 7: Test direct API call
-  console.log('16. Testing direct API call...')
-  try {
-    const directResponse = await paymentStatusStore.getPayments({ limit: 1000 })
-    console.log('17. Direct API response:', directResponse)
-    if (directResponse.success && directResponse.data) {
-      console.log('18. Direct API data length:', directResponse.data.length)
-      console.log('19. Direct API data sample:', directResponse.data.slice(0, 3))
-    }
-  } catch (error) {
-    console.error('20. Direct API call error:', error)
-  }
-  
-  console.log('=== DEBUG COMPLETE ===')
-}
+
 
 const savePayment = async () => {
   saving.value = true
@@ -1171,7 +1143,7 @@ const deletePayment = async (paymentId) => {
 }
 
 const sendWhatsAppReminders = async () => {
-  if (overviewData.value.unpaidMembers === 0) {
+  if (computedOverviewData.value.unpaidMembers === 0) {
     if ($q && $q.notify) {
       $q.notify({
         type: 'info',
@@ -1186,7 +1158,7 @@ const sendWhatsAppReminders = async () => {
 
   $q.dialog({
     title: 'Send WhatsApp Reminders',
-    message: `Send payment reminders to ${overviewData.value.unpaidMembers} unpaid members?`,
+    message: `Send payment reminders to ${computedOverviewData.value.unpaidMembers} unpaid members?`,
     cancel: true,
     persistent: true
   }).onOk(async () => {
@@ -1408,6 +1380,7 @@ onMounted(async () => {
   border: 1px solid #e9ecef;
   transition: all 0.3s ease;
   overflow: hidden;
+  
 }
 
 .overview-card:hover {
@@ -1441,6 +1414,19 @@ onMounted(async () => {
 
 .unpaid-users .card-avatar {
   background: linear-gradient(135deg, #e74c3c 0%, #ec7063 100%);
+}
+
+.total-amount .card-avatar {
+  background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%);
+}
+
+/* Center content within the Total Amount card */
+.overview-card.total-amount .q-card__section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
 }
 
 .card-info {

@@ -1,229 +1,1004 @@
 <template>
   <div class="food-menu-page">
     <div class="page-header">
-      <h1>Food Menu</h1>
-      <p>Manage nutrition plans and meal recommendations</p>
+      <h1>Food Menu Management</h1>
+      <p>Manage nutrition plans and food menus for your gym members</p>
     </div>
 
-    <div class="page-content">
-      <div class="content-header">
-        <button @click="showCreateMeal = true" class="btn-primary">Add New Meal</button>
-        <div class="category-filter">
-          <label>Filter by Category:</label>
-          <select v-model="selectedCategory" @change="filterMeals">
-            <option value="">All Categories</option>
-            <option value="breakfast">Breakfast</option>
-            <option value="lunch">Lunch</option>
-            <option value="dinner">Dinner</option>
-            <option value="snack">Snack</option>
-          </select>
+    <!-- User List Section -->
+    <div class="section">
+      <div class="section-header">
+        <h2>User List</h2>
+        <div class="search-container">
+          <q-input
+            v-model="userSearchQuery"
+            placeholder="Search users by name, email, or contact"
+            outlined
+            dense
+            class="search-input"
+          >
+            <template v-slot:prepend>
+              <q-icon name="search" />
+            </template>
+          </q-input>
         </div>
       </div>
 
-      <div class="meals-grid">
-        <div v-for="meal in filteredMeals" :key="meal.id" class="meal-card">
-          <div class="meal-header">
-            <h3>{{ meal.name }}</h3>
-            <span class="meal-category">{{ meal.category }}</span>
+      <div class="user-table-container">
+        <q-table
+          :rows="filteredUsers"
+          :columns="userColumns"
+          row-key="id"
+          flat
+          bordered
+          :loading="loadingUsers"
+          class="user-table"
+        >
+          <template v-slot:body-cell-status="props">
+            <q-td :props="props">
+              <q-badge
+                :color="props.value === 'Active' ? 'green' : 'red'"
+                :label="props.value"
+                class="status-badge"
+              />
+            </q-td>
+          </template>
+
+          <template v-slot:body-cell-actions="props">
+            <q-td :props="props">
+              <div class="action-buttons">
+                <q-btn
+                  flat
+                  round
+                  color="primary"
+                  icon="restaurant_menu"
+                  size="sm"
+                  @click="createFoodMenuForUser(props.row)"
+                  title="Create Food Menu"
+                />
+                <q-btn
+                  flat
+                  round
+                  color="orange"
+                  icon="edit"
+                  size="sm"
+                  @click="editUserFoodMenu(props.row)"
+                  title="Edit Food Menu"
+                />
+              </div>
+            </q-td>
+          </template>
+        </q-table>
+      </div>
+    </div>
+
+    <!-- Planned Nutrition Section -->
+    <div class="section">
+      <div class="section-header">
+        <h2>Planned Nutrition</h2>
+        <q-btn
+          color="primary"
+          icon="add"
+          label="Create New Plan"
+          @click="showCreatePlanDialog = true"
+          class="create-plan-btn"
+        />
+      </div>
+
+      <!-- Assign Plan to User -->
+      <div class="assign-plan-card">
+        <h3>Assign Nutrition Plan to User</h3>
+        <div class="assign-form">
+          <q-input
+            v-model="assignForm.userContact"
+            label="User Contact Number or ID"
+            placeholder="Enter user's contact or ID"
+            outlined
+            dense
+            class="form-field"
+          />
+          <q-select
+            v-model="assignForm.selectedPlan"
+            :options="nutritionPlanOptions"
+            label="Select Nutrition Plan"
+            placeholder="Select a plan"
+            outlined
+            dense
+            class="form-field"
+          />
+          <q-btn
+            color="green"
+            label="Assign Plan"
+            @click="assignPlanToUser"
+            :loading="assigningPlan"
+            class="assign-btn"
+          />
+        </div>
+      </div>
+
+      <!-- Search Planned Nutrition -->
+      <div class="search-planned-nutrition">
+        <q-input
+          v-model="nutritionSearchQuery"
+          placeholder="Search planned nutrition by name or user"
+          outlined
+          dense
+          class="search-input"
+        >
+          <template v-slot:prepend>
+            <q-icon name="search" />
+          </template>
+        </q-input>
+      </div>
+
+      <!-- Current Planned Nutrition Cards -->
+      <div class="nutrition-cards-grid">
+        <div
+          v-for="plan in filteredNutritionPlans"
+          :key="plan.id"
+          class="nutrition-card"
+        >
+          <div class="card-header">
+            <h4>{{ plan.menu_plan_category }} Plan</h4>
+            <q-badge
+              :color="plan.status === 'ACTIVE' ? 'green' : 'orange'"
+              :label="plan.status"
+              class="status-badge"
+            />
           </div>
           
-          <div class="meal-info">
-            <p><strong>Calories:</strong> {{ meal.calories }} kcal</p>
-            <p><strong>Protein:</strong> {{ meal.protein }}g</p>
-            <p><strong>Carbs:</strong> {{ meal.carbs }}g</p>
-            <p><strong>Fat:</strong> {{ meal.fat }}g</p>
+          <div class="card-content">
+            <div class="plan-details">
+              <p><strong>Start Date:</strong> {{ formatDate(plan.start_date) }}</p>
+              <p><strong>End Date:</strong> {{ formatDate(plan.end_date) }}</p>
+              <p><strong>Duration:</strong> {{ calculateDuration(plan.start_date, plan.end_date) }} days</p>
+            </div>
+            
+            <div class="nutrition-summary">
+              <div class="nutrition-item">
+                <span class="label">Calories:</span>
+                <span class="value">{{ plan.total_daily_calories }} kcal</span>
+              </div>
+              <div class="nutrition-item">
+                <span class="label">Protein:</span>
+                <span class="value">{{ plan.total_daily_protein }}g</span>
+              </div>
+              <div class="nutrition-item">
+                <span class="label">Carbs:</span>
+                <span class="value">{{ plan.total_daily_carbs }}g</span>
+              </div>
+              <div class="nutrition-item">
+                <span class="label">Fats:</span>
+                <span class="value">{{ plan.total_daily_fats }}g</span>
+              </div>
+            </div>
           </div>
-
-          <div class="meal-description">
-            <p>{{ meal.description }}</p>
-          </div>
-
-          <div class="meal-actions">
-            <button @click="editMeal(meal)" class="btn-small">Edit</button>
-            <button @click="deleteMeal(meal.id)" class="btn-small danger">Delete</button>
+          
+          <div class="card-actions">
+            <q-btn
+              flat
+              round
+              color="primary"
+              icon="visibility"
+              size="sm"
+              @click="viewNutritionPlan(plan)"
+              title="View Details"
+            />
+            <q-btn
+              flat
+              round
+              color="orange"
+              icon="edit"
+              size="sm"
+              @click="editNutritionPlan(plan)"
+              title="Edit Plan"
+            />
+            <q-btn
+              flat
+              round
+              color="red"
+              icon="delete"
+              size="sm"
+              @click="deleteNutritionPlan(plan.id)"
+              title="Delete Plan"
+            />
           </div>
         </div>
       </div>
-
-      <div v-if="filteredMeals.length === 0" class="no-meals">
-        <p>No meals found for the selected category.</p>
-      </div>
     </div>
 
-    <!-- Create/Edit Meal Modal -->
-    <div v-if="showCreateMeal || showEditMeal" class="modal">
-      <div class="modal-content">
-        <h3>{{ showCreateMeal ? 'Add New Meal' : 'Edit Meal' }}</h3>
-        <form @submit.prevent="handleSubmit">
-          <div class="form-group">
-            <label>Meal Name:</label>
-            <input v-model="mealForm.name" type="text" required />
-          </div>
-          <div class="form-group">
-            <label>Category:</label>
-            <select v-model="mealForm.category" required>
-              <option value="">Select Category</option>
-              <option value="breakfast">Breakfast</option>
-              <option value="lunch">Lunch</option>
-              <option value="dinner">Dinner</option>
-              <option value="snack">Snack</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Description:</label>
-            <textarea v-model="mealForm.description" rows="3" required></textarea>
-          </div>
-          <div class="nutrition-grid">
-            <div class="form-group">
-              <label>Calories (kcal):</label>
-              <input v-model="mealForm.calories" type="number" min="0" required />
+    <!-- Create New Plan Dialog -->
+    <q-dialog v-model="showCreatePlanDialog" persistent max-width="1200px">
+      <q-card class="create-plan-dialog">
+        <q-card-section class="dialog-header">
+          <div class="text-h6">Create Nutrition Plan</div>
+          <q-btn
+            flat
+            round
+            icon="close"
+            @click="showCreatePlanDialog = false"
+          />
+        </q-card-section>
+
+        <q-card-section class="dialog-content">
+          <div class="plan-form">
+            <!-- Date Range -->
+            <div class="form-section">
+              <h4>Date Range</h4>
+              <div class="date-range">
+                <q-input
+                  v-model="newPlan.start_date"
+                  label="Start Date"
+                  type="date"
+                  outlined
+                  dense
+                  class="form-field"
+                />
+                <q-input
+                  v-model="newPlan.end_date"
+                  label="End Date"
+                  type="date"
+                  outlined
+                  dense
+                  class="form-field"
+                />
+              </div>
             </div>
-            <div class="form-group">
-              <label>Protein (g):</label>
-              <input v-model="mealForm.protein" type="number" min="0" step="0.1" required />
+
+            <!-- Menu Plan Category -->
+            <div class="form-section">
+              <h4>Menu Plan Category</h4>
+              <q-select
+                v-model="newPlan.menu_plan_category"
+                :options="menuCategories"
+                label="Select Category"
+                outlined
+                dense
+                class="form-field"
+              />
             </div>
-            <div class="form-group">
-              <label>Carbs (g):</label>
-              <input v-model="mealForm.carbs" type="number" min="0" step="0.1" required />
-            </div>
-            <div class="form-group">
-              <label>Fat (g):</label>
-              <input v-model="mealForm.fat" type="number" min="0" step="0.1" required />
+
+            <!-- Daily Plans -->
+            <div class="form-section">
+              <div class="section-header">
+                <h4>Daily Plans</h4>
+                <q-btn
+                  color="green"
+                  icon="add"
+                  label="Add New Plan"
+                  @click="addNewDailyPlan"
+                  size="sm"
+                />
+              </div>
+
+              <div class="daily-plans">
+                <div
+                  v-for="(dailyPlan, planIndex) in newPlan.daily_plans"
+                  :key="planIndex"
+                  class="daily-plan-card"
+                >
+                  <div class="plan-header">
+                    <h5>Plan {{ planIndex + 1 }}</h5>
+                    <q-btn
+                      flat
+                      round
+                      color="red"
+                      icon="delete"
+                      size="sm"
+                      @click="removeDailyPlan(planIndex)"
+                    />
+                  </div>
+
+                  <div class="meals-section">
+                    <!-- Breakfast -->
+                    <div class="meal-section">
+                      <h6>Breakfast</h6>
+                      <div class="meal-items">
+                        <div
+                          v-for="(item, itemIndex) in dailyPlan.breakfast"
+                          :key="itemIndex"
+                          class="meal-item"
+                        >
+                          <q-input
+                            v-model="item.food_item_name"
+                            label="Food Item Name"
+                            outlined
+                            dense
+                            class="form-field"
+                          />
+                          <q-input
+                            v-model="item.grams"
+                            label="Grams"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            @input="calculateNutrition(item)"
+                          />
+                          <q-input
+                            v-model="item.protein"
+                            label="Protein (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.fats"
+                            label="Fats (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.carbs"
+                            label="Carbs (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.calories"
+                            label="Calories"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-btn
+                            flat
+                            round
+                            color="red"
+                            icon="delete"
+                            size="sm"
+                            @click="removeMealItem('breakfast', planIndex, itemIndex)"
+                          />
+                        </div>
+                        <q-btn
+                          color="green"
+                          icon="add"
+                          label="Add Item"
+                          @click="addMealItem('breakfast', planIndex)"
+                          size="sm"
+                        />
+                      </div>
+                    </div>
+
+                    <!-- Lunch -->
+                    <div class="meal-section">
+                      <h6>Lunch</h6>
+                      <div class="meal-items">
+                        <div
+                          v-for="(item, itemIndex) in dailyPlan.lunch"
+                          :key="itemIndex"
+                          class="meal-item"
+                        >
+                          <q-input
+                            v-model="item.food_item_name"
+                            label="Food Item Name"
+                            outlined
+                            dense
+                            class="form-field"
+                          />
+                          <q-input
+                            v-model="item.grams"
+                            label="Grams"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            @input="calculateNutrition(item)"
+                          />
+                          <q-input
+                            v-model="item.protein"
+                            label="Protein (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.fats"
+                            label="Fats (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.carbs"
+                            label="Carbs (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.calories"
+                            label="Calories"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-btn
+                            flat
+                            round
+                            color="red"
+                            icon="delete"
+                            size="sm"
+                            @click="removeMealItem('lunch', planIndex, itemIndex)"
+                          />
+                        </div>
+                        <q-btn
+                          color="green"
+                          icon="add"
+                          label="Add Item"
+                          @click="addMealItem('lunch', planIndex)"
+                          size="sm"
+                        />
+                      </div>
+                    </div>
+
+                    <!-- Dinner -->
+                    <div class="meal-section">
+                      <h6>Dinner</h6>
+                      <div class="meal-items">
+                        <div
+                          v-for="(item, itemIndex) in dailyPlan.dinner"
+                          :key="itemIndex"
+                          class="meal-item"
+                        >
+                          <q-input
+                            v-model="item.food_item_name"
+                            label="Food Item Name"
+                            outlined
+                            dense
+                            class="form-field"
+                          />
+                          <q-input
+                            v-model="item.grams"
+                            label="Grams"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            @input="calculateNutrition(item)"
+                          />
+                          <q-input
+                            v-model="item.protein"
+                            label="Protein (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.fats"
+                            label="Fats (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.carbs"
+                            label="Carbs (g)"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-input
+                            v-model="item.calories"
+                            label="Calories"
+                            type="number"
+                            outlined
+                            dense
+                            class="form-field"
+                            readonly
+                          />
+                          <q-btn
+                            flat
+                            round
+                            color="red"
+                            icon="delete"
+                            size="sm"
+                            @click="removeMealItem('dinner', planIndex, itemIndex)"
+                          />
+                        </div>
+                        <q-btn
+                          color="green"
+                          icon="add"
+                          label="Add Item"
+                          @click="addMealItem('dinner', planIndex)"
+                          size="sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="form-actions">
-            <button type="submit" :disabled="loading">
-              {{ loading ? 'Saving...' : (showCreateMeal ? 'Add Meal' : 'Update Meal') }}
-            </button>
-            <button type="button" @click="closeModal">Cancel</button>
+        </q-card-section>
+
+        <q-card-actions align="right" class="dialog-actions">
+          <q-btn flat label="Cancel" @click="showCreatePlanDialog = false" />
+          <q-btn
+            color="primary"
+            label="Save Plan"
+            @click="saveNutritionPlan"
+            :loading="savingPlan"
+            icon="save"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <!-- View Nutrition Plan Dialog -->
+    <q-dialog v-model="showViewDialog" max-width="800px">
+      <q-card class="view-plan-dialog">
+        <q-card-section class="dialog-header">
+          <div class="text-h6">Nutrition Plan Details</div>
+          <q-btn
+            flat
+            round
+            icon="close"
+            @click="showViewDialog = false"
+          />
+        </q-card-section>
+
+        <q-card-section class="dialog-content">
+          <div v-if="selectedPlan" class="plan-details">
+            <div class="plan-overview">
+              <h4>{{ selectedPlan.menu_plan_category }} Plan</h4>
+              <p><strong>Start Date:</strong> {{ formatDate(selectedPlan.start_date) }}</p>
+              <p><strong>End Date:</strong> {{ formatDate(selectedPlan.end_date) }}</p>
+              <p><strong>Duration:</strong> {{ calculateDuration(selectedPlan.start_date, selectedPlan.end_date) }} days</p>
+              <p><strong>Status:</strong> {{ selectedPlan.status }}</p>
+            </div>
+
+            <div class="nutrition-summary">
+              <h5>Daily Nutrition Summary</h5>
+              <div class="nutrition-grid">
+                <div class="nutrition-item">
+                  <span class="label">Total Calories:</span>
+                  <span class="value">{{ selectedPlan.total_daily_calories }} kcal</span>
+                </div>
+                <div class="nutrition-item">
+                  <span class="label">Total Protein:</span>
+                  <span class="value">{{ selectedPlan.total_daily_protein }}g</span>
+                </div>
+                <div class="nutrition-item">
+                  <span class="label">Total Carbs:</span>
+                  <span class="value">{{ selectedPlan.total_daily_carbs }}g</span>
+                </div>
+                <div class="nutrition-item">
+                  <span class="label">Total Fats:</span>
+                  <span class="value">{{ selectedPlan.total_daily_fats }}g</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="meal-details">
+              <h5>Meal Details</h5>
+              
+              <!-- Breakfast -->
+              <div v-if="selectedPlan.breakfast && selectedPlan.breakfast.length > 0" class="meal-section">
+                <h6>Breakfast</h6>
+                <div class="meal-items-grid">
+                  <div
+                    v-for="(item, index) in selectedPlan.breakfast"
+                    :key="index"
+                    class="meal-item-card"
+                  >
+                    <h7>{{ item.food_item_name }}</h7>
+                    <div class="item-details">
+                      <span>Grams: {{ item.grams }}g</span>
+                      <span>Protein: {{ item.protein }}g</span>
+                      <span>Fats: {{ item.fats }}g</span>
+                      <span>Carbs: {{ item.carbs }}g</span>
+                      <span>Calories: {{ item.calories }} kcal</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Lunch -->
+              <div v-if="selectedPlan.lunch && selectedPlan.lunch.length > 0" class="meal-section">
+                <h6>Lunch</h6>
+                <div class="meal-items-grid">
+                  <div
+                    v-for="(item, index) in selectedPlan.lunch"
+                    :key="index"
+                    class="meal-item-card"
+                  >
+                    <h7>{{ item.food_item_name }}</h7>
+                    <div class="item-details">
+                      <span>Grams: {{ item.grams }}g</span>
+                      <span>Protein: {{ item.protein }}g</span>
+                      <span>Fats: {{ item.fats }}g</span>
+                      <span>Carbs: {{ item.carbs }}g</span>
+                      <span>Calories: {{ item.calories }} kcal</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Dinner -->
+              <div v-if="selectedPlan.dinner && selectedPlan.dinner.length > 0" class="meal-section">
+                <h6>Dinner</h6>
+                <div class="meal-items-grid">
+                  <div
+                    v-for="(item, index) in selectedPlan.dinner"
+                    :key="index"
+                    class="meal-item-card"
+                  >
+                    <h7>{{ item.food_item_name }}</h7>
+                    <div class="item-details">
+                      <span>Grams: {{ item.grams }}g</span>
+                      <span>Protein: {{ item.protein }}g</span>
+                      <span>Fats: {{ item.fats }}g</span>
+                      <span>Carbs: {{ item.carbs }}g</span>
+                      <span>Calories: {{ item.calories }} kcal</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </form>
-      </div>
-    </div>
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Close" @click="showViewDialog = false" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useUserManagementStore } from '../stores/userManagement'
+import { useAuthStore } from '../stores/auth'
+import { useFoodMenuStore } from '../stores/foodMenu'
+import api from '../config/axios'
 
-const loading = ref(false)
-const showCreateMeal = ref(false)
-const showEditMeal = ref(false)
-const selectedCategory = ref('')
-const meals = ref([])
-const editingMeal = ref(null)
+// Stores
+const userManagementStore = useUserManagementStore()
+const authStore = useAuthStore()
+const foodMenuStore = useFoodMenuStore()
 
-const mealForm = ref({
-  name: '',
-  category: '',
-  description: '',
-  calories: 0,
-  protein: 0,
-  carbs: 0,
-  fat: 0
+// Reactive data
+const userSearchQuery = ref('')
+const nutritionSearchQuery = ref('')
+const loadingUsers = ref(false)
+const savingPlan = ref(false)
+const assigningPlan = ref(false)
+
+// Dialog states
+const showCreatePlanDialog = ref(false)
+const showViewDialog = ref(false)
+const selectedPlan = ref(null)
+
+// User list data
+const users = ref([])
+
+// Nutrition plans data
+const nutritionPlans = ref([])
+
+// Assign form
+const assignForm = ref({
+  userContact: '',
+  selectedPlan: null
 })
 
-const filteredMeals = computed(() => {
-  if (!selectedCategory.value) return meals.value
-  return meals.value.filter(meal => meal.category === selectedCategory.value)
-})
-
-onMounted(() => {
-  loadMeals()
-})
-
-const loadMeals = () => {
-  // Mock data - replace with actual API call
-  meals.value = [
+// New plan form
+const newPlan = ref({
+  start_date: '',
+  end_date: '',
+  menu_plan_category: '',
+  daily_plans: [
     {
-      id: 1,
-      name: 'Protein Pancakes',
-      category: 'breakfast',
-      description: 'High protein pancakes with berries and Greek yogurt',
-      calories: 350,
-      protein: 25,
-      carbs: 30,
-      fat: 12
-    },
-    {
-      id: 2,
-      name: 'Grilled Chicken Salad',
-      category: 'lunch',
-      description: 'Mixed greens with grilled chicken breast and olive oil dressing',
-      calories: 280,
-      protein: 35,
-      carbs: 15,
-      fat: 8
-    },
-    {
-      id: 3,
-      name: 'Salmon with Quinoa',
-      category: 'dinner',
-      description: 'Baked salmon fillet with quinoa and steamed vegetables',
-      calories: 420,
-      protein: 40,
-      carbs: 35,
-      fat: 15
+      breakfast: [],
+      lunch: [],
+      dinner: []
     }
   ]
-}
+})
 
-const editMeal = (meal) => {
-  editingMeal.value = meal
-  mealForm.value = { ...meal }
-  showEditMeal.value = true
-}
+// Options
+const menuCategories = ['Weight Gain', 'Weight Lose', 'Muscle building']
+const nutritionPlanOptions = ref([])
 
-const closeModal = () => {
-  showCreateMeal.value = false
-  showEditMeal.value = false
-  editingMeal.value = null
-  mealForm.value = {
-    name: '',
-    category: '',
-    description: '',
-    calories: 0,
-    protein: 0,
-    carbs: 0,
-    fat: 0
+// User table columns
+const userColumns = [
+  {
+    name: 'id',
+    required: true,
+    label: 'ID',
+    align: 'left',
+    field: 'id',
+    sortable: true
+  },
+  {
+    name: 'name',
+    required: true,
+    label: 'Name',
+    align: 'left',
+    field: 'name',
+    sortable: true
+  },
+  {
+    name: 'email',
+    required: true,
+    label: 'Email',
+    align: 'left',
+    field: 'email',
+    sortable: true
+  },
+  {
+    name: 'contact',
+    required: true,
+    label: 'Contact',
+    align: 'left',
+    field: 'contact',
+    sortable: true
+  },
+  {
+    name: 'status',
+    required: true,
+    label: 'Status',
+    align: 'left',
+    field: 'status',
+    sortable: true
+  },
+  {
+    name: 'actions',
+    required: true,
+    label: 'Actions',
+    align: 'center',
+    field: 'actions'
+  }
+]
+
+// Computed properties
+const filteredUsers = computed(() => {
+  if (!userSearchQuery.value) return users.value
+  
+  const query = userSearchQuery.value.toLowerCase()
+  return users.value.filter(user => 
+    user.name.toLowerCase().includes(query) ||
+    user.email.toLowerCase().includes(query) ||
+    user.contact.toLowerCase().includes(query)
+  )
+})
+
+const filteredNutritionPlans = computed(() => {
+  if (!nutritionSearchQuery.value) return nutritionPlans.value
+  
+  const query = nutritionSearchQuery.value.toLowerCase()
+  return nutritionPlans.value.filter(plan => 
+    plan.menu_plan_category.toLowerCase().includes(query) ||
+    plan.start_date.toLowerCase().includes(query) ||
+    plan.end_date.toLowerCase().includes(query)
+  )
+})
+
+// Methods
+const loadUsers = async () => {
+  try {
+    loadingUsers.value = true
+    await userManagementStore.fetchUsers()
+    users.value = userManagementStore.users
+  } catch (error) {
+    console.error('Error loading users:', error)
+  } finally {
+    loadingUsers.value = false
   }
 }
 
-const handleSubmit = async () => {
-  loading.value = true
+const loadNutritionPlans = async () => {
+  try {
+    await foodMenuStore.fetchFoodMenus()
+    nutritionPlans.value = foodMenuStore.foodMenus
+    nutritionPlanOptions.value = nutritionPlans.value.map(plan => ({
+      label: `${plan.menu_plan_category} (${formatDate(plan.start_date)} - ${formatDate(plan.end_date)})`,
+      value: plan.id
+    }))
+  } catch (error) {
+    console.error('Error loading nutrition plans:', error)
+  }
+}
+
+const createFoodMenuForUser = (user) => {
+  // Set user context and open create dialog
+  newPlan.value.user_id = user.id
+  showCreatePlanDialog.value = true
+}
+
+const editUserFoodMenu = (user) => {
+  // Find existing food menu for user and edit
+  console.log('Edit food menu for user:', user)
+}
+
+const assignPlanToUser = async () => {
+  if (!assignForm.value.userContact || !assignForm.value.selectedPlan) {
+    return
+  }
   
   try {
-    // TODO: Implement API call
-    console.log('Saving meal:', mealForm.value)
-    
-    // Mock success
-    setTimeout(() => {
-      closeModal()
-      loadMeals()
-      loading.value = false
-    }, 1000)
+    assigningPlan.value = true
+    // Implementation for assigning plan to user
+    console.log('Assigning plan:', assignForm.value)
   } catch (error) {
-    console.error('Error saving meal:', error)
-    loading.value = false
+    console.error('Error assigning plan:', error)
+  } finally {
+    assigningPlan.value = false
   }
 }
 
-const deleteMeal = async (id) => {
-  if (confirm('Are you sure you want to delete this meal?')) {
-    // TODO: Implement API call
-    console.log('Deleting meal:', id)
+const addNewDailyPlan = () => {
+  newPlan.value.daily_plans.push({
+    breakfast: [],
+    lunch: [],
+    dinner: []
+  })
+}
+
+const removeDailyPlan = (index) => {
+  if (newPlan.value.daily_plans.length > 1) {
+    newPlan.value.daily_plans.splice(index, 1)
   }
 }
 
-const filterMeals = () => {
-  // Filtering is handled by computed property
+const addMealItem = (mealType, planIndex) => {
+  newPlan.value.daily_plans[planIndex][mealType].push({
+    food_item_name: '',
+    grams: 0,
+    protein: 0,
+    fats: 0,
+    carbs: 0,
+    calories: 0
+  })
 }
+
+const removeMealItem = (mealType, planIndex, itemIndex) => {
+  newPlan.value.daily_plans[planIndex][mealType].splice(itemIndex, 1)
+}
+
+const calculateNutrition = async (item) => {
+  if (!item.food_item_name || !item.grams) return
+  
+  try {
+    // Use the store's nutrition calculation method
+    const nutrition = foodMenuStore.getMockNutrition(item.food_item_name, item.grams)
+    
+    item.protein = nutrition.protein
+    item.fats = nutrition.fats
+    item.carbs = nutrition.carbs
+    item.calories = nutrition.calories
+  } catch (error) {
+    console.error('Error calculating nutrition:', error)
+  }
+}
+
+const saveNutritionPlan = async () => {
+  try {
+    savingPlan.value = true
+    
+    // Calculate totals from all daily plans
+    const allMeals = []
+    newPlan.value.daily_plans.forEach(plan => {
+      allMeals.push(...plan.breakfast, ...plan.lunch, ...plan.dinner)
+    })
+    
+    const totalProtein = allMeals.reduce((sum, item) => sum + (item.protein || 0), 0)
+    const totalFats = allMeals.reduce((sum, item) => sum + (item.fats || 0), 0)
+    const totalCarbs = allMeals.reduce((sum, item) => sum + (item.carbs || 0), 0)
+    const totalCalories = allMeals.reduce((sum, item) => sum + (item.calories || 0), 0)
+    
+    const planData = {
+      menu_plan_category: newPlan.value.menu_plan_category,
+      start_date: newPlan.value.start_date,
+      end_date: newPlan.value.end_date,
+      breakfast: newPlan.value.daily_plans[0].breakfast,
+      lunch: newPlan.value.daily_plans[0].lunch,
+      dinner: newPlan.value.daily_plans[0].dinner,
+      total_daily_protein: totalProtein,
+      total_daily_fats: totalFats,
+      total_daily_carbs: totalCarbs,
+      total_daily_calories: totalCalories
+    }
+    
+    await foodMenuStore.createFoodMenu(planData)
+    
+    // Reset form
+    resetNewPlanForm()
+    showCreatePlanDialog.value = false
+    
+    // Reload plans
+    await loadNutritionPlans()
+    
+    console.log('Nutrition plan saved successfully')
+  } catch (error) {
+    console.error('Error saving nutrition plan:', error)
+  } finally {
+    savingPlan.value = false
+  }
+}
+
+const resetNewPlanForm = () => {
+  newPlan.value = {
+    start_date: '',
+    end_date: '',
+    menu_plan_category: '',
+    daily_plans: [
+      {
+        breakfast: [],
+        lunch: [],
+        dinner: []
+      }
+    ]
+  }
+}
+
+const viewNutritionPlan = (plan) => {
+  selectedPlan.value = plan
+  showViewDialog.value = true
+}
+
+const editNutritionPlan = (plan) => {
+  // Implementation for editing nutrition plan
+  console.log('Edit nutrition plan:', plan)
+}
+
+const deleteNutritionPlan = async (planId) => {
+  try {
+    await foodMenuStore.deleteFoodMenu(planId)
+    await loadNutritionPlans()
+    console.log('Nutrition plan deleted successfully')
+  } catch (error) {
+    console.error('Error deleting nutrition plan:', error)
+  }
+}
+
+const formatDate = (dateString) => {
+  return new Date(dateString).toLocaleDateString()
+}
+
+const calculateDuration = (startDate, endDate) => {
+  const start = new Date(startDate)
+  const end = new Date(endDate)
+  const diffTime = Math.abs(end - start)
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+}
+
+// Lifecycle
+onMounted(async () => {
+  await loadUsers()
+  await loadNutritionPlans()
+})
 </script>
 
 <style scoped>
 .food-menu-page {
   padding: 2rem;
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
 }
 
@@ -238,163 +1013,302 @@ const filterMeals = () => {
 
 .page-header p {
   color: #666;
-  font-size: 1.1rem;
+  margin: 0;
 }
 
-.content-header {
+.section {
+  margin-bottom: 3rem;
+}
+
+.section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
 
-.category-filter {
+.section-header h2 {
+  color: #333;
+  margin: 0;
+}
+
+.search-container {
+  width: 300px;
+}
+
+.search-input {
+  width: 100%;
+}
+
+.user-table-container {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.user-table {
+  width: 100%;
+}
+
+.status-badge {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+}
+
+.action-buttons {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
 }
 
-.category-filter label {
-  font-weight: 500;
+.create-plan-btn {
+  font-weight: 600;
+}
+
+.assign-plan-card {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.assign-plan-card h3 {
+  margin: 0 0 1rem 0;
   color: #333;
 }
 
-.category-filter select {
-  padding: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 5px;
+.assign-form {
+  display: flex;
+  gap: 1rem;
+  align-items: end;
 }
 
-.meals-grid {
+.form-field {
+  min-width: 200px;
+}
+
+.assign-btn {
+  height: 40px;
+  min-width: 120px;
+}
+
+.search-planned-nutrition {
+  margin-bottom: 2rem;
+}
+
+.search-planned-nutrition .search-input {
+  max-width: 400px;
+}
+
+.nutrition-cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
   gap: 1.5rem;
 }
 
-.meal-card {
+.nutrition-card {
   background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 12px;
   padding: 1.5rem;
-  border-radius: 10px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.meal-header {
+.nutrition-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e9ecef;
 }
 
-.meal-header h3 {
+.card-header h4 {
+  margin: 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.card-content {
+  margin-bottom: 1rem;
+}
+
+.plan-details p {
+  margin: 0.5rem 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.nutrition-summary {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.nutrition-item {
+  display: flex;
+  justify-content: space-between;
+  margin: 0.25rem 0;
+  font-size: 0.9rem;
+}
+
+.nutrition-item .label {
+  color: #666;
+}
+
+.nutrition-item .value {
+  font-weight: 600;
+  color: #333;
+}
+
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e9ecef;
+}
+
+/* Dialog Styles */
+.create-plan-dialog {
+  width: 100%;
+  max-width: 1200px;
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.dialog-content {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.plan-form {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.form-section {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.form-section h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.date-range {
+  display: flex;
+  gap: 1rem;
+}
+
+.daily-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.daily-plan-card {
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.plan-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.plan-header h5 {
   margin: 0;
   color: #333;
 }
 
-.meal-category {
-  padding: 0.25rem 0.75rem;
-  border-radius: 15px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  text-transform: capitalize;
-  background: #e9ecef;
-  color: #495057;
+.meals-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
-.meal-info {
-  margin-bottom: 1rem;
+.meal-section h6 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 1rem;
 }
 
-.meal-info p {
+.meal-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.meal-item {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr auto;
+  gap: 1rem;
+  align-items: end;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.dialog-actions {
+  padding-top: 1rem;
+  border-top: 1px solid #e9ecef;
+}
+
+/* View Dialog Styles */
+.view-plan-dialog {
+  width: 100%;
+  max-width: 800px;
+}
+
+.plan-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.plan-overview {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.plan-overview h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.plan-overview p {
   margin: 0.5rem 0;
   color: #666;
 }
 
-.meal-description {
-  margin-bottom: 1.5rem;
-}
-
-.meal-description p {
-  color: #666;
-  font-style: italic;
-}
-
-.meal-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.btn-primary, .btn-small {
-  padding: 0.75rem 1.5rem;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s;
-}
-
-.btn-primary {
-  background: #007bff;
-  color: white;
-}
-
-.btn-primary:hover {
-  background: #0056b3;
-}
-
-.btn-small {
-  padding: 0.5rem 1rem;
-  font-size: 0.9rem;
-}
-
-.btn-small.danger {
-  background: #dc3545;
-  color: white;
-}
-
-.btn-small.danger:hover {
-  background: #c82333;
-}
-
-.modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: white;
-  padding: 2rem;
-  border-radius: 10px;
-  width: 90%;
-  max-width: 600px;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-
-.form-group {
-  margin-bottom: 1rem;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 500;
+.nutrition-summary h5 {
+  margin: 0 0 1rem 0;
   color: #333;
-}
-
-.form-group input, .form-group select, .form-group textarea {
-  width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  font-size: 1rem;
 }
 
 .nutrition-grid {
@@ -403,35 +1317,88 @@ const filterMeals = () => {
   gap: 1rem;
 }
 
-.form-actions {
-  display: flex;
+.meal-details h5 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.meal-section {
+  margin-bottom: 1.5rem;
+}
+
+.meal-section h6 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 1rem;
+}
+
+.meal-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 1rem;
-  justify-content: flex-end;
-  margin-top: 1.5rem;
 }
 
-.no-meals {
-  text-align: center;
-  padding: 2rem;
-  color: #666;
+.meal-item-card {
+  background: #e8f5e8;
+  border: 1px solid #c3e6c3;
+  border-radius: 8px;
+  padding: 1rem;
 }
 
+.meal-item-card h7 {
+  display: block;
+  font-weight: 600;
+  color: #2d5a2d;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.item-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.item-details span {
+  font-size: 0.8rem;
+  color: #4a6741;
+}
+
+/* Responsive Design */
 @media (max-width: 768px) {
   .food-menu-page {
     padding: 1rem;
   }
   
-  .meals-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .content-header {
+  .section-header {
     flex-direction: column;
     gap: 1rem;
     align-items: stretch;
   }
   
+  .search-container {
+    width: 100%;
+  }
+  
+  .assign-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .nutrition-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .meal-item {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  
   .nutrition-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .meal-items-grid {
     grid-template-columns: 1fr;
   }
 }

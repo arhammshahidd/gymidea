@@ -70,8 +70,8 @@
           </template>
         </q-table>
       </div>
-    </div>
-
+          </div>
+          
     <!-- Planned Nutrition Section -->
     <div class="section">
       <div class="section-header">
@@ -83,19 +83,26 @@
           @click="showCreatePlanDialog = true"
           class="create-plan-btn"
         />
-      </div>
+          </div>
 
       <!-- Assign Plan to User -->
       <div class="assign-plan-card">
         <h3>Assign Nutrition Plan to User</h3>
         <div class="assign-form">
-          <q-input
-            v-model="assignForm.userContact"
-            label="User Contact Number or ID"
-            placeholder="Enter user's contact or ID"
+          <q-select
+            v-model="assignForm.selectedUser"
+            :options="userOptions"
+            use-input
+            fill-input
+            input-debounce="200"
+            label="Search user by name, email, or contact"
+            
             outlined
             dense
             class="form-field"
+            emit-value
+            map-options
+            @filter="filterUsers"
           />
           <q-select
             v-model="assignForm.selectedPlan"
@@ -105,6 +112,8 @@
             outlined
             dense
             class="form-field"
+            emit-value
+            map-options
           />
           <q-btn
             color="green"
@@ -114,7 +123,7 @@
             class="assign-btn"
           />
         </div>
-      </div>
+          </div>
 
       <!-- Search Planned Nutrition -->
       <div class="search-planned-nutrition">
@@ -129,7 +138,7 @@
             <q-icon name="search" />
           </template>
         </q-input>
-      </div>
+          </div>
 
       <!-- Current Planned Nutrition Cards -->
       <div class="nutrition-cards-grid">
@@ -145,35 +154,35 @@
               :label="plan.status"
               class="status-badge"
             />
-          </div>
+        </div>
           
           <div class="card-content">
             <div class="plan-details">
               <p><strong>Start Date:</strong> {{ formatDate(plan.start_date) }}</p>
               <p><strong>End Date:</strong> {{ formatDate(plan.end_date) }}</p>
               <p><strong>Duration:</strong> {{ calculateDuration(plan.start_date, plan.end_date) }} days</p>
-            </div>
-            
+      </div>
+
             <div class="nutrition-summary">
               <div class="nutrition-item">
-                <span class="label">Calories:</span>
-                <span class="value">{{ plan.total_daily_calories }} kcal</span>
+                <span class="label">Total Calories:</span>
+                <span class="value">{{ Number(plan.total_daily_calories || 0).toFixed(2) }} kcal</span>
               </div>
               <div class="nutrition-item">
-                <span class="label">Protein:</span>
-                <span class="value">{{ plan.total_daily_protein }}g</span>
+                <span class="label">Total Protein:</span>
+                <span class="value">{{ Number(plan.total_daily_protein || 0).toFixed(2) }}g</span>
               </div>
               <div class="nutrition-item">
-                <span class="label">Carbs:</span>
-                <span class="value">{{ plan.total_daily_carbs }}g</span>
+                <span class="label">Total Carbs:</span>
+                <span class="value">{{ Number(plan.total_daily_carbs || 0).toFixed(2) }}g</span>
               </div>
               <div class="nutrition-item">
-                <span class="label">Fats:</span>
-                <span class="value">{{ plan.total_daily_fats }}g</span>
+                <span class="label">Total Fats:</span>
+                <span class="value">{{ Number(plan.total_daily_fats || 0).toFixed(2) }}g</span>
               </div>
-            </div>
-          </div>
-          
+      </div>
+    </div>
+
           <div class="card-actions">
             <q-btn
               flat
@@ -203,8 +212,8 @@
               title="Delete Plan"
             />
           </div>
-        </div>
-      </div>
+          </div>
+          </div>
     </div>
 
     <!-- Create New Plan Dialog -->
@@ -305,6 +314,7 @@
                             outlined
                             dense
                             class="form-field"
+                            @update:model-value="() => calculateNutrition(item)"
                           />
                           <q-input
                             v-model="item.grams"
@@ -313,7 +323,7 @@
                             outlined
                             dense
                             class="form-field"
-                            @input="calculateNutrition(item)"
+                            @update:model-value="val => { item.grams = Number(val) || 0; calculateNutrition(item) }"
                           />
                           <q-input
                             v-model="item.protein"
@@ -385,6 +395,7 @@
                             outlined
                             dense
                             class="form-field"
+                            @update:model-value="() => calculateNutrition(item)"
                           />
                           <q-input
                             v-model="item.grams"
@@ -393,7 +404,7 @@
                             outlined
                             dense
                             class="form-field"
-                            @input="calculateNutrition(item)"
+                            @update:model-value="val => { item.grams = Number(val) || 0; calculateNutrition(item) }"
                           />
                           <q-input
                             v-model="item.protein"
@@ -465,6 +476,7 @@
                             outlined
                             dense
                             class="form-field"
+                            @update:model-value="() => calculateNutrition(item)"
                           />
                           <q-input
                             v-model="item.grams"
@@ -473,7 +485,7 @@
                             outlined
                             dense
                             class="form-field"
-                            @input="calculateNutrition(item)"
+                            @update:model-value="val => { item.grams = Number(val) || 0; calculateNutrition(item) }"
                           />
                           <q-input
                             v-model="item.protein"
@@ -549,6 +561,20 @@
       </q-card>
     </q-dialog>
 
+    <!-- Assignment Success Dialog -->
+    <q-dialog v-model="showAssignmentDialog" persistent transition-show="fade" transition-hide="fade">
+      <q-card style="min-width: 360px">
+        <q-card-section class="row items-center q-gutter-sm">
+          <q-icon name="check_circle" color="green" size="32px" />
+          <div class="text-h6">Nutrition Plan Assigned</div>
+        </q-card-section>
+        <q-card-section>
+          Plan successfully assigned to <strong>{{ assignedUserName }}</strong>.
+        </q-card-section>
+        <q-linear-progress color="green" indeterminate />
+      </q-card>
+    </q-dialog>
+
     <!-- View Nutrition Plan Dialog -->
     <q-dialog v-model="showViewDialog" max-width="800px">
       <q-card class="view-plan-dialog">
@@ -574,87 +600,105 @@
 
             <div class="nutrition-summary">
               <h5>Daily Nutrition Summary</h5>
-              <div class="nutrition-grid">
+          <div class="nutrition-grid">
                 <div class="nutrition-item">
                   <span class="label">Total Calories:</span>
                   <span class="value">{{ selectedPlan.total_daily_calories }} kcal</span>
-                </div>
+            </div>
                 <div class="nutrition-item">
                   <span class="label">Total Protein:</span>
                   <span class="value">{{ selectedPlan.total_daily_protein }}g</span>
-                </div>
+            </div>
                 <div class="nutrition-item">
                   <span class="label">Total Carbs:</span>
                   <span class="value">{{ selectedPlan.total_daily_carbs }}g</span>
-                </div>
+            </div>
                 <div class="nutrition-item">
                   <span class="label">Total Fats:</span>
                   <span class="value">{{ selectedPlan.total_daily_fats }}g</span>
-                </div>
-              </div>
             </div>
+          </div>
+          </div>
 
             <div class="meal-details">
               <h5>Meal Details</h5>
-              
-              <!-- Breakfast -->
-              <div v-if="selectedPlan.breakfast && selectedPlan.breakfast.length > 0" class="meal-section">
-                <h6>Breakfast</h6>
-                <div class="meal-items-grid">
-                  <div
-                    v-for="(item, index) in selectedPlan.breakfast"
-                    :key="index"
-                    class="meal-item-card"
-                  >
-                    <h7>{{ item.food_item_name }}</h7>
-                    <div class="item-details">
-                      <span>Grams: {{ item.grams }}g</span>
-                      <span>Protein: {{ item.protein }}g</span>
-                      <span>Fats: {{ item.fats }}g</span>
-                      <span>Carbs: {{ item.carbs }}g</span>
-                      <span>Calories: {{ item.calories }} kcal</span>
+              <div class="days-list">
+                <div
+                  v-for="day in (selectedPlan.total_days || 1)"
+                  :key="day"
+                  class="day-section"
+                >
+                  <h5>Day {{ day }}</h5>
+
+                  <!-- Breakfast -->
+                  <div class="meal-section">
+                    <h6>Breakfast</h6>
+                    <div class="meal-items-grid">
+                      <div v-if="getMealsForDay('breakfast', day).length > 0">
+                        <div
+                          v-for="(item, index) in getMealsForDay('breakfast', day)"
+                          :key="index"
+                          class="meal-item-card"
+                        >
+                          <h7>{{ item.food_item_name }}</h7>
+                          <div class="item-details">
+                            <span>Grams: {{ item.grams }}g</span>
+                            <span>Protein: {{ item.protein }}g</span>
+                            <span>Fats: {{ item.fats }}g</span>
+                            <span>Carbs: {{ item.carbs }}g</span>
+                            <span>Calories: {{ item.calories }} kcal</span>
+      </div>
+    </div>
+                      </div>
+                      <div v-else class="empty-meal">No breakfast defined for this plan. Using Day 1 items.</div>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              <!-- Lunch -->
-              <div v-if="selectedPlan.lunch && selectedPlan.lunch.length > 0" class="meal-section">
-                <h6>Lunch</h6>
-                <div class="meal-items-grid">
-                  <div
-                    v-for="(item, index) in selectedPlan.lunch"
-                    :key="index"
-                    class="meal-item-card"
-                  >
-                    <h7>{{ item.food_item_name }}</h7>
-                    <div class="item-details">
-                      <span>Grams: {{ item.grams }}g</span>
-                      <span>Protein: {{ item.protein }}g</span>
-                      <span>Fats: {{ item.fats }}g</span>
-                      <span>Carbs: {{ item.carbs }}g</span>
-                      <span>Calories: {{ item.calories }} kcal</span>
+                  <!-- Lunch -->
+                  <div class="meal-section">
+                    <h6>Lunch</h6>
+                    <div class="meal-items-grid">
+                      <div v-if="getMealsForDay('lunch', day).length > 0">
+                        <div
+                          v-for="(item, index) in getMealsForDay('lunch', day)"
+                          :key="index"
+                          class="meal-item-card"
+                        >
+                          <h7>{{ item.food_item_name }}</h7>
+                          <div class="item-details">
+                            <span>Grams: {{ item.grams }}g</span>
+                            <span>Protein: {{ item.protein }}g</span>
+                            <span>Fats: {{ item.fats }}g</span>
+                            <span>Carbs: {{ item.carbs }}g</span>
+                            <span>Calories: {{ item.calories }} kcal</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div v-else class="empty-meal">No lunch defined for this plan. Using Day 1 items.</div>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              <!-- Dinner -->
-              <div v-if="selectedPlan.dinner && selectedPlan.dinner.length > 0" class="meal-section">
-                <h6>Dinner</h6>
-                <div class="meal-items-grid">
-                  <div
-                    v-for="(item, index) in selectedPlan.dinner"
-                    :key="index"
-                    class="meal-item-card"
-                  >
-                    <h7>{{ item.food_item_name }}</h7>
-                    <div class="item-details">
-                      <span>Grams: {{ item.grams }}g</span>
-                      <span>Protein: {{ item.protein }}g</span>
-                      <span>Fats: {{ item.fats }}g</span>
-                      <span>Carbs: {{ item.carbs }}g</span>
-                      <span>Calories: {{ item.calories }} kcal</span>
+                  <!-- Dinner -->
+                  <div class="meal-section">
+                    <h6>Dinner</h6>
+                    <div class="meal-items-grid">
+                      <div v-if="getMealsForDay('dinner', day).length > 0">
+                        <div
+                          v-for="(item, index) in getMealsForDay('dinner', day)"
+                          :key="index"
+                          class="meal-item-card"
+                        >
+                          <h7>{{ item.food_item_name }}</h7>
+                          <div class="item-details">
+                            <span>Grams: {{ item.grams }}g</span>
+                            <span>Protein: {{ item.protein }}g</span>
+                            <span>Fats: {{ item.fats }}g</span>
+                            <span>Carbs: {{ item.carbs }}g</span>
+                            <span>Calories: {{ item.calories }} kcal</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div v-else class="empty-meal">No dinner defined for this plan. Using Day 1 items.</div>
                     </div>
                   </div>
                 </div>
@@ -689,11 +733,14 @@ const nutritionSearchQuery = ref('')
 const loadingUsers = ref(false)
 const savingPlan = ref(false)
 const assigningPlan = ref(false)
+const showAssignmentDialog = ref(false)
+const assignedUserName = ref('')
 
 // Dialog states
 const showCreatePlanDialog = ref(false)
 const showViewDialog = ref(false)
 const selectedPlan = ref(null)
+const editingPlanId = ref(null)
 
 // User list data
 const users = ref([])
@@ -703,7 +750,7 @@ const nutritionPlans = ref([])
 
 // Assign form
 const assignForm = ref({
-  userContact: '',
+  selectedUser: null,
   selectedPlan: null
 })
 
@@ -724,6 +771,7 @@ const newPlan = ref({
 // Options
 const menuCategories = ['Weight Gain', 'Weight Lose', 'Muscle building']
 const nutritionPlanOptions = ref([])
+const userOptions = ref([])
 
 // User table columns
 const userColumns = [
@@ -804,7 +852,11 @@ const loadUsers = async () => {
   try {
     loadingUsers.value = true
     await userManagementStore.fetchUsers()
-    users.value = userManagementStore.users
+    // Normalize contact field so it appears in the table
+    users.value = (userManagementStore.users || []).map(u => ({
+      ...u,
+      contact: u.contact || u.phone || u.mobile || u.phone_number || u.user_phone || ''
+    }))
   } catch (error) {
     console.error('Error loading users:', error)
   } finally {
@@ -815,10 +867,43 @@ const loadUsers = async () => {
 const loadNutritionPlans = async () => {
   try {
     await foodMenuStore.fetchFoodMenus()
-    nutritionPlans.value = foodMenuStore.foodMenus
+    // Dedupe by id to avoid duplicate cards after create/save
+    const byId = new Map()
+    for (const plan of foodMenuStore.foodMenus) {
+      if (plan && plan.id != null) {
+        byId.set(plan.id, plan)
+      }
+    }
+    // Normalize and enrich plans with computed daily totals for card display
+    const plansArr = Array.from(byId.values()).map(p => {
+      const parseMeals = (val) => {
+        if (!val) return []
+        if (Array.isArray(val)) return val
+        try { const j = JSON.parse(val); return Array.isArray(j) ? j : [] } catch { return [] }
+      }
+      const breakfast = parseMeals(p.breakfast || p.BREAKFAST)
+      const lunch = parseMeals(p.lunch || p.LUNCH)
+      const dinner = parseMeals(p.dinner || p.DINNER)
+      const all = [...breakfast, ...lunch, ...dinner]
+      const sum = (k) => all.reduce((s, it) => s + (Number(it[k]) || 0), 0)
+      const totals = {
+        total_daily_calories: sum('calories'),
+        total_daily_protein: sum('protein'),
+        total_daily_carbs: sum('carbs'),
+        total_daily_fats: sum('fats')
+      }
+      return {
+        ...p,
+        total_daily_calories: Number(p.total_daily_calories || 0) || totals.total_daily_calories,
+        total_daily_protein: Number(p.total_daily_protein || 0) || totals.total_daily_protein,
+        total_daily_carbs: Number(p.total_daily_carbs || 0) || totals.total_daily_carbs,
+        total_daily_fats: Number(p.total_daily_fats || 0) || totals.total_daily_fats
+      }
+    })
+    nutritionPlans.value = plansArr
     nutritionPlanOptions.value = nutritionPlans.value.map(plan => ({
       label: `${plan.menu_plan_category} (${formatDate(plan.start_date)} - ${formatDate(plan.end_date)})`,
-      value: plan.id
+      value: Number(plan.id)
     }))
   } catch (error) {
     console.error('Error loading nutrition plans:', error)
@@ -828,25 +913,126 @@ const loadNutritionPlans = async () => {
 const createFoodMenuForUser = (user) => {
   // Set user context and open create dialog
   newPlan.value.user_id = user.id
+  editingPlanId.value = null
   showCreatePlanDialog.value = true
 }
 
 const editUserFoodMenu = (user) => {
-  // Find existing food menu for user and edit
-  console.log('Edit food menu for user:', user)
+  // Open dialog in create mode for this user
+  newPlan.value.user_id = user.id
+  editingPlanId.value = null
+  showCreatePlanDialog.value = true
 }
 
 const assignPlanToUser = async () => {
-  if (!assignForm.value.userContact || !assignForm.value.selectedPlan) {
+  // Validate
+  if (!assignForm.value.selectedUser || !assignForm.value.selectedPlan) {
+    alert('Please select a user and a nutrition plan to assign')
     return
   }
-  
+
   try {
     assigningPlan.value = true
-    // Implementation for assigning plan to user
-    console.log('Assigning plan:', assignForm.value)
+    const user = users.value.find(u => u.id === assignForm.value.selectedUser)
+    if (!user) { alert('User not found'); return }
+
+    // Get selected plan details
+    const planId = assignForm.value.selectedPlan
+    // Fetch full plan details to ensure meals are included
+    let plan = nutritionPlans.value.find(p => p.id === planId)
+    try {
+      const full = await foodMenuStore.getFoodMenu(planId)
+      if (full) plan = { ...plan, ...full }
+    } catch (e) {
+      // ignore and use existing summary
+    }
+    if (!plan) {
+      alert('Selected plan not found')
+      return
+    }
+
+    // Ensure meals are JSON objects
+    const parseMeals = (val) => {
+      if (!val) return []
+      if (Array.isArray(val)) return val
+      try { const p = JSON.parse(val); return Array.isArray(p) ? p : [] } catch { return [] }
+    }
+    // Normalize user fields required by backend
+    const userName = user.name || user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim()
+    const userEmail = user.email || user.email_id || user.user_email || ''
+    const userContact = user.contact || user.phone || user.mobile || user.phone_number || ''
+    if (!userName || !userEmail || !userContact) {
+      alert('Selected user is missing name/email/contact. Please complete user profile before assigning.')
+      return
+    }
+
+    const mealsObj = {
+      breakfast: parseMeals(plan.breakfast || plan.BREAKFAST),
+      lunch: parseMeals(plan.lunch || plan.LUNCH),
+      dinner: parseMeals(plan.dinner || plan.DINNER)
+    }
+    // Flatten to array of items as backend expects an array
+    const normalizeItem = (it, meal_type) => ({
+      meal_type,
+      food_item_name: it.food_item_name || it.name || it.item_name || '',
+      grams: Number(it.grams || 0),
+      protein: Number(it.protein || 0),
+      fats: Number(it.fats || 0),
+      carbs: Number(it.carbs || 0),
+      calories: Number(it.calories || 0),
+      day: Number(it.day || 1)
+    })
+    const foodItems = [
+      ...mealsObj.breakfast.map(it => normalizeItem(it, 'breakfast')),
+      ...mealsObj.lunch.map(it => normalizeItem(it, 'lunch')),
+      ...mealsObj.dinner.map(it => normalizeItem(it, 'dinner'))
+    ].filter(it => it.food_item_name && it.grams > 0)
+    if (foodItems.length === 0) {
+      alert('Selected plan has no meals to assign. Please add items first.')
+      return
+    }
+
+    const approvalPayload = {
+      user_id: user.id,
+      name: userName,
+      email: userEmail,
+      contact: userContact,
+      menu_plan_category: plan.menu_plan_category || plan.category || 'General',
+      total_days: calculateDuration(plan.start_date, plan.end_date),
+      description: `Assigned food menu (${plan.menu_plan_category || plan.category}) from ${formatDate(plan.start_date)} to ${formatDate(plan.end_date)}`,
+      // Backend expects a non-empty array
+      food_items: foodItems,
+      total_protein: Number(plan.total_daily_protein || 0),
+      total_fats: Number(plan.total_daily_fats || 0),
+      total_carbs: Number(plan.total_daily_carbs || 0),
+      total_calories: Number(plan.total_daily_calories || 0),
+      approval_status: 'ASSIGNED',
+      start_date: plan.start_date,
+      end_date: plan.end_date
+    }
+
+    // Use Approval Food Menu API to record assignment
+    // Some backends require array; others require JSON. Try array first; on server error asking for JSON, fall back.
+    try {
+      await foodMenuStore.createApprovalRequest(approvalPayload)
+    } catch (err) {
+      const msg = err?.response?.data?.message || ''
+      if (String(msg).toLowerCase().includes('json')) {
+        // Retry with JSON string
+        await foodMenuStore.createApprovalRequest({ ...approvalPayload, food_items: JSON.stringify(foodItems) })
+      } else {
+        throw err
+      }
+    }
+
+    // Reset form
+    assignForm.value = { selectedUser: null, selectedPlan: null }
+    assignedUserName.value = user.name
+    showAssignmentDialog.value = true
+    setTimeout(() => { showAssignmentDialog.value = false }, 2000)
   } catch (error) {
     console.error('Error assigning plan:', error)
+    alert('Failed to assign plan: ' + (error.response?.data?.message || error.message))
   } finally {
     assigningPlan.value = false
   }
@@ -901,31 +1087,77 @@ const saveNutritionPlan = async () => {
   try {
     savingPlan.value = true
     
-    // Calculate totals from all daily plans
-    const allMeals = []
-    newPlan.value.daily_plans.forEach(plan => {
-      allMeals.push(...plan.breakfast, ...plan.lunch, ...plan.dinner)
+    // Basic validations
+    if (!newPlan.value.start_date || !newPlan.value.end_date || !newPlan.value.menu_plan_category) {
+      alert('Please fill Start Date, End Date and Menu Plan Category')
+      return
+    }
+    const hasAnyItem = (newPlan.value.daily_plans || []).some(dp =>
+      (dp.breakfast && dp.breakfast.length) ||
+      (dp.lunch && dp.lunch.length) ||
+      (dp.dinner && dp.dinner.length)
+    )
+    if (!hasAnyItem) {
+      alert('Please add at least one food item in Breakfast, Lunch or Dinner')
+      return
+    }
+    // Ensure grams are numbers and nutrition is calculated
+    const ensureNutrition = (items) => {
+      items.forEach((it) => {
+        it.grams = Number(it.grams) || 0
+        if (it.food_item_name && it.grams > 0) {
+          const n = foodMenuStore.getMockNutrition(it.food_item_name, it.grams)
+          it.protein = n.protein
+          it.fats = n.fats
+          it.carbs = n.carbs
+          it.calories = n.calories
+        }
+      })
+    }
+    newPlan.value.daily_plans.forEach(dp => {
+      ensureNutrition(dp.breakfast || [])
+      ensureNutrition(dp.lunch || [])
+      ensureNutrition(dp.dinner || [])
     })
     
-    const totalProtein = allMeals.reduce((sum, item) => sum + (item.protein || 0), 0)
-    const totalFats = allMeals.reduce((sum, item) => sum + (item.fats || 0), 0)
-    const totalCarbs = allMeals.reduce((sum, item) => sum + (item.carbs || 0), 0)
-    const totalCalories = allMeals.reduce((sum, item) => sum + (item.calories || 0), 0)
+    // Calculate totals from all daily plans (sum once across all days)
+    const allMeals = []
+    newPlan.value.daily_plans.forEach(plan => {
+      allMeals.push(...(plan.breakfast || []), ...(plan.lunch || []), ...(plan.dinner || []))
+    })
+    const totalProtein = allMeals.reduce((sum, item) => sum + (Number(item.protein) || 0), 0)
+    const totalFats = allMeals.reduce((sum, item) => sum + (Number(item.fats) || 0), 0)
+    const totalCarbs = allMeals.reduce((sum, item) => sum + (Number(item.carbs) || 0), 0)
+    const totalCalories = allMeals.reduce((sum, item) => sum + (Number(item.calories) || 0), 0)
     
+    // Combine daily plans into flat arrays with day indicator
+    const combined = { breakfast: [], lunch: [], dinner: [] }
+    newPlan.value.daily_plans.forEach((planDay, idx) => {
+      const day = idx + 1
+      ;(planDay.breakfast || []).forEach(it => combined.breakfast.push({ ...it, day }))
+      ;(planDay.lunch || []).forEach(it => combined.lunch.push({ ...it, day }))
+      ;(planDay.dinner || []).forEach(it => combined.dinner.push({ ...it, day }))
+    })
+
     const planData = {
       menu_plan_category: newPlan.value.menu_plan_category,
       start_date: newPlan.value.start_date,
       end_date: newPlan.value.end_date,
-      breakfast: newPlan.value.daily_plans[0].breakfast,
-      lunch: newPlan.value.daily_plans[0].lunch,
-      dinner: newPlan.value.daily_plans[0].dinner,
+      // Stringify meals to satisfy back-end JSON.parse expectations
+      breakfast: JSON.stringify(combined.breakfast),
+      lunch: JSON.stringify(combined.lunch),
+      dinner: JSON.stringify(combined.dinner),
       total_daily_protein: totalProtein,
       total_daily_fats: totalFats,
       total_daily_carbs: totalCarbs,
       total_daily_calories: totalCalories
     }
     
-    await foodMenuStore.createFoodMenu(planData)
+    if (editingPlanId.value) {
+      await foodMenuStore.updateFoodMenu(editingPlanId.value, planData)
+    } else {
+      await foodMenuStore.createFoodMenu(planData)
+    }
     
     // Reset form
     resetNewPlanForm()
@@ -937,6 +1169,7 @@ const saveNutritionPlan = async () => {
     console.log('Nutrition plan saved successfully')
   } catch (error) {
     console.error('Error saving nutrition plan:', error)
+    alert('Failed to save plan: ' + (error.response?.data?.message || error.message))
   } finally {
     savingPlan.value = false
   }
@@ -958,13 +1191,87 @@ const resetNewPlanForm = () => {
 }
 
 const viewNutritionPlan = (plan) => {
-  selectedPlan.value = plan
+  // Parse meal JSON strings (backend stores as JSON text)
+  const parseMeals = (val) => {
+    if (!val) return []
+    if (Array.isArray(val)) return val
+    try {
+      const parsed = JSON.parse(val)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+
+  const normalized = { ...plan }
+  normalized.breakfast = parseMeals(plan.breakfast)
+  normalized.lunch = parseMeals(plan.lunch)
+  normalized.dinner = parseMeals(plan.dinner)
+  // Ensure option values are numbers when building options
+  // Derive total_days for Day 1..N rendering from meals.day or date range, whichever is larger
+  const mealMax = Math.max(
+    1,
+    ...normalized.breakfast.map(m => Number(m.day || 1)),
+    ...normalized.lunch.map(m => Number(m.day || 1)),
+    ...normalized.dinner.map(m => Number(m.day || 1))
+  )
+  const rangeDays = calculateDuration(plan.start_date, plan.end_date)
+  normalized.total_days = Math.max(mealMax, rangeDays)
+  normalized.max_defined_day = mealMax
+  // Compute totals from parsed meals if not present or zero
+  const allMealsForTotals = [
+    ...normalized.breakfast,
+    ...normalized.lunch,
+    ...normalized.dinner
+  ]
+  const sum = (arr, key) => arr.reduce((s, it) => s + (Number(it[key]) || 0), 0)
+  const totals = {
+    total_daily_calories: sum(allMealsForTotals, 'calories'),
+    total_daily_protein: sum(allMealsForTotals, 'protein'),
+    total_daily_carbs: sum(allMealsForTotals, 'carbs'),
+    total_daily_fats: sum(allMealsForTotals, 'fats')
+  }
+  normalized.total_daily_calories = Number(plan.total_daily_calories || 0) || totals.total_daily_calories
+  normalized.total_daily_protein = Number(plan.total_daily_protein || 0) || totals.total_daily_protein
+  normalized.total_daily_carbs = Number(plan.total_daily_carbs || 0) || totals.total_daily_carbs
+  normalized.total_daily_fats = Number(plan.total_daily_fats || 0) || totals.total_daily_fats
+  selectedPlan.value = normalized
   showViewDialog.value = true
 }
 
+// Helper to get meals for a given day with fallback to Day 1 items
+const getMealsForDay = (type, day) => {
+  if (!selectedPlan.value) return []
+  const list = (selectedPlan.value[type] || [])
+  const exact = list.filter(it => Number(it.day || 1) === Number(day))
+  if (exact.length > 0) return exact
+  // Fallback: if day > defined max, reuse Day 1 items to avoid empty sections
+  const day1 = list.filter(it => Number(it.day || 1) === 1)
+  return day1
+}
+
 const editNutritionPlan = (plan) => {
-  // Implementation for editing nutrition plan
-  console.log('Edit nutrition plan:', plan)
+  editingPlanId.value = plan.id
+  const parseMeals = (val) => {
+    if (!val) return []
+    if (Array.isArray(val)) return val
+    try { const p = JSON.parse(val); return Array.isArray(p) ? p : [] } catch { return [] }
+  }
+  const b = parseMeals(plan.breakfast)
+  const l = parseMeals(plan.lunch)
+  const d = parseMeals(plan.dinner)
+  const maxDay = Math.max(1, ...b.map(x => x.day || 1), ...l.map(x => x.day || 1), ...d.map(x => x.day || 1))
+  const daily = Array.from({ length: maxDay }, () => ({ breakfast: [], lunch: [], dinner: [] }))
+  b.forEach(it => daily[(it.day || 1) - 1].breakfast.push({ ...it }))
+  l.forEach(it => daily[(it.day || 1) - 1].lunch.push({ ...it }))
+  d.forEach(it => daily[(it.day || 1) - 1].dinner.push({ ...it }))
+  newPlan.value = {
+    start_date: plan.start_date,
+    end_date: plan.end_date,
+    menu_plan_category: plan.menu_plan_category,
+    daily_plans: daily
+  }
+  showCreatePlanDialog.value = true
 }
 
 const deleteNutritionPlan = async (planId) => {
@@ -991,8 +1298,27 @@ const calculateDuration = (startDate, endDate) => {
 // Lifecycle
 onMounted(async () => {
   await loadUsers()
+  // Prime user options for the select
+  userOptions.value = users.value.map(u => ({ label: `${u.name} (${u.contact})`, value: u.id }))
   await loadNutritionPlans()
 })
+
+// Dynamic filter for user select
+const filterUsers = (val, update, abort) => {
+  const needle = (val || '').toLowerCase()
+  update(() => {
+    const source = users.value
+    const items = !needle
+      ? source
+      : source.filter(u =>
+          u.name?.toLowerCase().includes(needle) ||
+          u.email?.toLowerCase().includes(needle) ||
+          String(u.contact || u.phone || u.mobile || u.phone_number || '').toLowerCase().includes(needle) ||
+          String(u.id).includes(needle)
+        )
+    userOptions.value = items.map(u => ({ label: `${u.name} (${u.contact || u.phone || u.mobile || ''})`, value: u.id }))
+  })
+}
 </script>
 
 <style scoped>

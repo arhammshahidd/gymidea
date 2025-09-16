@@ -59,6 +59,15 @@
                 <q-btn
                   flat
                   round
+                  color="teal"
+                  icon="visibility"
+                  size="sm"
+                  @click="viewUserAssignments(props.row)"
+                  title="View Assigned Plans"
+                />
+                <q-btn
+                  flat
+                  round
                   color="orange"
                   icon="edit"
                   size="sm"
@@ -561,6 +570,44 @@
       </q-card>
     </q-dialog>
 
+    <!-- Assigned Plans Dialog -->
+    <q-dialog v-model="showAssignmentsDialog" max-width="900px">
+      <q-card class="view-plan-dialog">
+        <q-card-section class="dialog-header">
+          <div class="text-h6">Assigned Nutrition Plans - {{ assignmentsUserName }}</div>
+          <q-btn flat round icon="close" @click="showAssignmentsDialog = false" />
+        </q-card-section>
+        <q-card-section class="dialog-content">
+          <div v-if="userAssignments && userAssignments.length > 0">
+            <div class="nutrition-cards-grid">
+              <div v-for="a in userAssignments" :key="a.id" class="nutrition-card">
+                <div class="card-header">
+                  <h4>{{ a.menu_plan_category }} Plan</h4>
+                  <q-badge :label="a.status" :color="a.status === 'ASSIGNED' ? 'green' : 'orange'" />
+                </div>
+                <div class="card-content">
+                  <div class="plan-details">
+                    <p><strong>Assigned On:</strong> {{ formatDate(a.created_at) }}</p>
+                    <p><strong>Start Date:</strong> {{ formatDate(a.start_date || a.menu_start_date) }}</p>
+                    <p><strong>End Date:</strong> {{ formatDate(a.end_date || a.menu_end_date) }}</p>
+                  </div>
+                  <div class="nutrition-summary">
+                    <div class="nutrition-item"><span class="label">Calories:</span><span class="value">{{ Number(a.total_daily_calories || 0).toFixed(2) }} kcal</span></div>
+                    <div class="nutrition-item"><span class="label">Protein:</span><span class="value">{{ Number(a.total_daily_protein || 0).toFixed(2) }}g</span></div>
+                    <div class="nutrition-item"><span class="label">Carbs:</span><span class="value">{{ Number(a.total_daily_carbs || 0).toFixed(2) }}g</span></div>
+                    <div class="nutrition-item"><span class="label">Fats:</span><span class="value">{{ Number(a.total_daily_fats || 0).toFixed(2) }}g</span></div>
+                  </div>
+                </div>
+                <div class="card-actions">
+                  <q-btn flat round color="primary" icon="visibility" size="sm" @click="viewNutritionPlan(a)" title="View Details" />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else>No assignments found.</div>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
     <!-- Assignment Success Dialog -->
     <q-dialog v-model="showAssignmentDialog" persistent transition-show="fade" transition-hide="fade">
       <q-card style="min-width: 360px">
@@ -640,7 +687,7 @@
                           :key="index"
                           class="meal-item-card"
                         >
-                          <h7>{{ item.food_item_name }}</h7>
+                          <div class="meal-item-title">{{ item.food_item_name }}</div>
                           <div class="item-details">
                             <span>Grams: {{ item.grams }}g</span>
                             <span>Protein: {{ item.protein }}g</span>
@@ -664,7 +711,7 @@
                           :key="index"
                           class="meal-item-card"
                         >
-                          <h7>{{ item.food_item_name }}</h7>
+                          <div class="meal-item-title">{{ item.food_item_name }}</div>
                           <div class="item-details">
                             <span>Grams: {{ item.grams }}g</span>
                             <span>Protein: {{ item.protein }}g</span>
@@ -688,7 +735,7 @@
                           :key="index"
                           class="meal-item-card"
                         >
-                          <h7>{{ item.food_item_name }}</h7>
+                          <div class="meal-item-title">{{ item.food_item_name }}</div>
                           <div class="item-details">
                             <span>Grams: {{ item.grams }}g</span>
                             <span>Protein: {{ item.protein }}g</span>
@@ -986,9 +1033,10 @@ const assignPlanToUser = async () => {
       ...mealsObj.breakfast.map(it => normalizeItem(it, 'breakfast')),
       ...mealsObj.lunch.map(it => normalizeItem(it, 'lunch')),
       ...mealsObj.dinner.map(it => normalizeItem(it, 'dinner'))
-    ].filter(it => it.food_item_name && it.grams > 0)
+    ].filter(it => it.food_item_name || it.grams > 0 || it.protein > 0 || it.carbs > 0 || it.fats > 0 || it.calories > 0)
+    console.debug('Assign payload meals:', { planId, foodItemsCount: foodItems.length, sample: foodItems[0] })
     if (foodItems.length === 0) {
-      alert('Selected plan has no meals to assign. Please add items first.')
+      alert('Selected plan has no meals to assign. Please add items first or reopen the plan and save at least one meal item.')
       return
     }
 
@@ -1011,19 +1059,14 @@ const assignPlanToUser = async () => {
       end_date: plan.end_date
     }
 
-    // Use Approval Food Menu API to record assignment
-    // Some backends require array; others require JSON. Try array first; on server error asking for JSON, fall back.
-    try {
-      await foodMenuStore.createApprovalRequest(approvalPayload)
-    } catch (err) {
-      const msg = err?.response?.data?.message || ''
-      if (String(msg).toLowerCase().includes('json')) {
-        // Retry with JSON string
-        await foodMenuStore.createApprovalRequest({ ...approvalPayload, food_items: JSON.stringify(foodItems) })
-      } else {
-        throw err
-      }
-    }
+    // Call lightweight assignment endpoint
+    await foodMenuStore.assignFoodMenuToUser({
+      user_id: user.id,
+      food_menu_id: planId,
+      start_date: plan.start_date,
+      end_date: plan.end_date,
+      notes: `Assigned ${plan.menu_plan_category} plan`
+    })
 
     // Reset form
     assignForm.value = { selectedUser: null, selectedPlan: null }
@@ -1239,6 +1282,19 @@ const viewNutritionPlan = (plan) => {
   showViewDialog.value = true
 }
 
+// View a user's assigned nutrition plans
+const userAssignments = ref([])
+const showAssignmentsDialog = ref(false)
+const assignmentsUserName = ref('')
+const viewUserAssignments = async (user) => {
+  try {
+    assignmentsUserName.value = user.name
+    userAssignments.value = await foodMenuStore.fetchUserAssignments(user.id)
+    showAssignmentsDialog.value = true
+  } catch (e) {
+    alert('Failed to load user assignments: ' + (e.response?.data?.message || e.message))
+  }
+}
 // Helper to get meals for a given day with fallback to Day 1 items
 const getMealsForDay = (type, day) => {
   if (!selectedPlan.value) return []
@@ -1671,7 +1727,7 @@ const filterUsers = (val, update, abort) => {
   padding: 1rem;
 }
 
-.meal-item-card h7 {
+.meal-item-title {
   display: block;
   font-weight: 600;
   color: #2d5a2d;

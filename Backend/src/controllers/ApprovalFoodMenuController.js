@@ -106,7 +106,7 @@ exports.create = async (req, res, next) => {
     } = req.body;
     
     // Validate required fields
-    if (!name || !email || !contact || !menu_plan_category || !food_items) {
+    if (!name || !email || !contact || !menu_plan_category || food_items === undefined) {
       return res.status(400).json({
         success: false,
         message: 'name, email, contact, menu_plan_category, and food_items are required'
@@ -122,8 +122,16 @@ exports.create = async (req, res, next) => {
       });
     }
     
-    // Validate food_items is an array
-    if (!Array.isArray(food_items) || food_items.length === 0) {
+    // Accept food_items as array or JSON string and normalize
+    let parsedFoodItems = food_items;
+    if (typeof parsedFoodItems === 'string') {
+      try {
+        parsedFoodItems = JSON.parse(parsedFoodItems);
+      } catch (e) {
+        return res.status(400).json({ success: false, message: 'food_items must be a non-empty array' });
+      }
+    }
+    if (!Array.isArray(parsedFoodItems) || parsedFoodItems.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'food_items must be a non-empty array'
@@ -131,8 +139,8 @@ exports.create = async (req, res, next) => {
     }
     
     // Validate each food item has required fields
-    for (let i = 0; i < food_items.length; i++) {
-      const item = food_items[i];
+    for (let i = 0; i < parsedFoodItems.length; i++) {
+      const item = parsedFoodItems[i];
       if (!item.food_item_name || !item.grams || item.protein === undefined || 
           item.fats === undefined || item.carbs === undefined || item.calories === undefined) {
         return res.status(400).json({
@@ -143,7 +151,7 @@ exports.create = async (req, res, next) => {
     }
     
     // Calculate nutrition totals
-    const nutritionTotals = calculateNutritionTotals(food_items);
+    const nutritionTotals = calculateNutritionTotals(parsedFoodItems);
     
     // Create the approval request
     const [request] = await db('approval_food_menu')
@@ -156,7 +164,7 @@ exports.create = async (req, res, next) => {
         menu_plan_category,
         total_days: total_days || 30,
         description: description || null,
-        food_items: JSON.stringify(food_items),
+        food_items: JSON.stringify(parsedFoodItems),
         total_protein: nutritionTotals.protein,
         total_fats: nutritionTotals.fats,
         total_carbs: nutritionTotals.carbs,
@@ -231,7 +239,11 @@ exports.update = async (req, res, next) => {
     
     // Validate food_items if provided
     if (food_items) {
-      if (!Array.isArray(food_items) || food_items.length === 0) {
+      let parsedFoodItems = food_items
+      if (typeof parsedFoodItems === 'string') {
+        try { parsedFoodItems = JSON.parse(parsedFoodItems) } catch (e) { parsedFoodItems = [] }
+      }
+      if (!Array.isArray(parsedFoodItems) || parsedFoodItems.length === 0) {
         return res.status(400).json({
           success: false,
           message: 'food_items must be a non-empty array'
@@ -239,8 +251,8 @@ exports.update = async (req, res, next) => {
       }
       
       // Validate each food item has required fields
-      for (let i = 0; i < food_items.length; i++) {
-        const item = food_items[i];
+      for (let i = 0; i < parsedFoodItems.length; i++) {
+        const item = parsedFoodItems[i];
         if (!item.food_item_name || !item.grams || item.protein === undefined || 
             item.fats === undefined || item.carbs === undefined || item.calories === undefined) {
           return res.status(400).json({
@@ -260,9 +272,13 @@ exports.update = async (req, res, next) => {
     if (total_days !== undefined) updateData.total_days = total_days;
     if (description !== undefined) updateData.description = description;
     if (food_items !== undefined) {
-      updateData.food_items = JSON.stringify(food_items);
+      let parsedFoodItems = food_items
+      if (typeof parsedFoodItems === 'string') {
+        try { parsedFoodItems = JSON.parse(parsedFoodItems) } catch (e) { parsedFoodItems = [] }
+      }
+      updateData.food_items = JSON.stringify(parsedFoodItems);
       // Recalculate nutrition totals
-      const nutritionTotals = calculateNutritionTotals(food_items);
+      const nutritionTotals = calculateNutritionTotals(parsedFoodItems);
       updateData.total_protein = nutritionTotals.protein;
       updateData.total_fats = nutritionTotals.fats;
       updateData.total_carbs = nutritionTotals.carbs;

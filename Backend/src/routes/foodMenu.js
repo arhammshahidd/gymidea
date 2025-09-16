@@ -9,6 +9,9 @@ router.use(authMiddleware('gym_admin'));
 // Food Menu Routes
 router.get('/', foodMenuController.list);                    // GET /api/foodMenu - List all food menus
 router.get('/categories', foodMenuController.getCategories); // GET /api/foodMenu/categories - Get available categories
+// Place specific routes BEFORE the dynamic :id route
+router.get('/assignments', foodMenuController.listAssignments); // GET /api/foodMenu/assignments?user_id=
+router.post('/assign', foodMenuController.assignToUser);       // POST /api/foodMenu/assign - Assign plan to user
 router.get('/:id', foodMenuController.get);                  // GET /api/foodMenu/:id - Get single food menu
 router.post('/', foodMenuController.create);                 // POST /api/foodMenu - Create new food menu
 router.put('/:id', foodMenuController.update);               // PUT /api/foodMenu/:id - Update food menu

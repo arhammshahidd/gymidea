@@ -1,3 +1,62 @@
+// Assign a food menu to a user (simple linkage, no approval)
+exports.assignToUser = async (req, res, next) => {
+  try {
+    const { food_menu_id, user_id, start_date, end_date, notes } = req.body
+    if (!food_menu_id || !user_id) {
+      return res.status(400).json({ success: false, message: 'food_menu_id and user_id are required' })
+    }
+
+    // Ensure menu exists for gym
+    const menu = await require('../config/db')('food_menu')
+      .where({ id: food_menu_id, gym_id: req.user.gym_id }).first()
+    if (!menu) {
+      return res.status(404).json({ success: false, message: 'Food menu not found' })
+    }
+
+    const db = require('../config/db')
+    const [assignment] = await db('food_menu_assignments')
+      .insert({
+        gym_id: req.user.gym_id,
+        food_menu_id,
+        user_id,
+        start_date: start_date || menu.start_date || null,
+        end_date: end_date || menu.end_date || null,
+        status: 'ASSIGNED',
+        notes: notes || null
+      })
+      .returning('*')
+
+    res.status(201).json({ success: true, data: assignment })
+  } catch (err) { next(err) }
+}
+
+// List assignments for a user (most recent first), joined with basic menu info
+exports.listAssignments = async (req, res, next) => {
+  try {
+    const { user_id, page = 1, limit = 20 } = req.query
+    const db = require('../config/db')
+    const q = db('food_menu_assignments as a')
+      .where('a.gym_id', req.user.gym_id)
+      .orderBy('a.created_at', 'desc')
+
+    if (user_id) q.andWhere('a.user_id', user_id)
+
+    const rows = await q
+      .leftJoin('food_menu as m', 'm.id', 'a.food_menu_id')
+      .select(
+        'a.*',
+        'm.menu_plan_category',
+        'm.start_date as menu_start_date',
+        'm.end_date as menu_end_date',
+        'm.breakfast', 'm.lunch', 'm.dinner',
+        'm.total_daily_calories', 'm.total_daily_protein', 'm.total_daily_carbs', 'm.total_daily_fats'
+      )
+      .limit(limit)
+      .offset((page - 1) * limit)
+
+    res.json({ success: true, data: rows })
+  } catch (err) { next(err) }
+}
 const db = require('../config/db');
 
 // Helper function to calculate nutrition totals

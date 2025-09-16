@@ -63,7 +63,7 @@ export const useFoodMenuStore = defineStore('foodMenu', {
       return (category) => {
         return state.approvalRequests.filter(request => request.menu_plan_category === category)
       }
-    }
+    },
   },
 
   actions: {
@@ -74,7 +74,13 @@ export const useFoodMenuStore = defineStore('foodMenu', {
         this.error = null
         
         const response = await api.get('/foodMenu', { params })
-        this.foodMenus = response.data.data
+        // Normalize and dedupe by id to avoid duplicates
+        const items = Array.isArray(response.data.data) ? response.data.data : []
+        const byId = new Map()
+        for (const item of items) {
+          if (item && item.id != null) byId.set(item.id, item)
+        }
+        this.foodMenus = Array.from(byId.values())
         
         return response.data
       } catch (error) {
@@ -91,7 +97,7 @@ export const useFoodMenuStore = defineStore('foodMenu', {
         this.error = null
         
         const response = await api.get(`/foodMenu/${id}`)
-        return response.data.data
+        return response.data.data || response.data
       } catch (error) {
         this.error = error.response?.data?.message || 'Failed to fetch food menu'
         console.error('Error fetching food menu:', error)
@@ -105,8 +111,13 @@ export const useFoodMenuStore = defineStore('foodMenu', {
         
         const response = await api.post('/foodMenu', menuData)
         
-        // Add to local state
-        this.foodMenus.unshift(response.data.data)
+        // Add to local state, replacing any existing with same id
+        const created = response.data.data
+        if (created && created.id != null) {
+          const index = this.foodMenus.findIndex(m => m.id === created.id)
+          if (index !== -1) this.foodMenus.splice(index, 1, created)
+          else this.foodMenus.unshift(created)
+        }
         
         return response.data
       } catch (error) {
@@ -224,7 +235,17 @@ export const useFoodMenuStore = defineStore('foodMenu', {
       try {
         this.error = null
         
-        const response = await api.post('/approvalFoodMenu', requestData)
+        // Ensure food_items is an array; if it's a string from previous callers, try to parse
+        let payload = { ...requestData }
+        try {
+          if (typeof payload.food_items === 'string') {
+            payload.food_items = JSON.parse(payload.food_items)
+          }
+        } catch (e) {
+          // leave as is, backend will handle parsing fallback
+        }
+
+        const response = await api.post('/approvalFoodMenu', payload)
         
         // Add to local state
         this.approvalRequests.unshift(response.data.data)
@@ -233,6 +254,36 @@ export const useFoodMenuStore = defineStore('foodMenu', {
       } catch (error) {
         this.error = error.response?.data?.message || 'Failed to create approval request'
         console.error('Error creating approval request:', error)
+        throw error
+      }
+    },
+
+    async assignFoodMenuToUser({ user_id, food_menu_id, start_date, end_date, notes }) {
+      try {
+        this.error = null
+        const response = await api.post('/foodMenu/assign', {
+          user_id,
+          food_menu_id,
+          start_date,
+          end_date,
+          notes
+        })
+        return response.data
+      } catch (error) {
+        this.error = error.response?.data?.message || 'Failed to assign food menu'
+        console.error('Error assigning food menu:', error)
+        throw error
+      }
+    },
+
+    async fetchUserAssignments(user_id) {
+      try {
+        this.error = null
+        const response = await api.get('/foodMenu/assignments', { params: { user_id } })
+        return response.data.data
+      } catch (error) {
+        this.error = error.response?.data?.message || 'Failed to fetch user assignments'
+        console.error('Error fetching user assignments:', error)
         throw error
       }
     },

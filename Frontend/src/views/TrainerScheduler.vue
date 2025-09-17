@@ -718,7 +718,7 @@
                          class="workout-detail-card"
                        >
                          <div class="workout-card-header">
-                           <h7>{{ exercise.name }}</h7>
+                           <div class="exercise-name">{{ exercise.name }}</div>
                          </div>
                          <div class="workout-card-content">
                            <div class="workout-detail-row">
@@ -1807,7 +1807,7 @@ onMounted(async () => {
   border: 1px solid #e0e0e0;
 }
 
-.exercise-info h7 {
+.exercise-info .exercise-name {
   display: block;
   margin: 0 0 0.25rem 0;
   color: #333;
@@ -1921,7 +1921,7 @@ onMounted(async () => {
   text-align: left;
 }
 
-.workout-card-header h7 {
+.workout-card-header .exercise-name {
   margin: 0;
   font-size: 1.1rem;
   font-weight: bold;

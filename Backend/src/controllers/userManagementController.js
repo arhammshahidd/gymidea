@@ -4,7 +4,7 @@ const bcrypt = require('bcrypt');
 // Get user statistics
 exports.getUserStats = async (req, res) => {
   try {
-    const gymId = req.user.gymId;
+    const gymId = req.user.gym_id;
     
     console.log('=== GETTING USER STATS ===');
     console.log('Gym ID:', gymId);
@@ -58,7 +58,7 @@ exports.getUserStats = async (req, res) => {
 // Get all users for the gym
 exports.getAllUsers = async (req, res) => {
   try {
-    const gymId = req.user.gymId;
+    const gymId = req.user.gym_id;
     
     console.log('=== GETTING ALL USERS ===');
     console.log('Gym ID:', gymId);
@@ -80,7 +80,7 @@ exports.getAllUsers = async (req, res) => {
 exports.getUserById = async (req, res) => {
   try {
     const { id } = req.params;
-    const gymId = req.user.gymId;
+    const gymId = req.user.gym_id;
     
     console.log('=== GETTING USER BY ID ===');
     console.log('User ID:', id, 'Gym ID:', gymId);
@@ -105,7 +105,7 @@ exports.getUserById = async (req, res) => {
 // Create new user
 exports.createUser = async (req, res) => {
   try {
-    const gymId = req.user.gymId;
+    const gymId = req.user.gym_id;
     const { name, email, phone, password, status = 'ACTIVE', membership_tier = 'BASIC' } = req.body;
     
     console.log('=== CREATING USER ===');
@@ -166,7 +166,7 @@ exports.createUser = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const gymId = req.user.gymId;
+    const gymId = req.user.gym_id;
     const { name, email, phone, password, status, membership_tier } = req.body;
     
     console.log('=== UPDATING USER ===');
@@ -233,7 +233,7 @@ exports.updateUser = async (req, res) => {
 exports.deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const gymId = req.user.gymId;
+    const gymId = req.user.gym_id;
     
     console.log('=== DELETING USER ===');
     console.log('User ID:', id, 'Gym ID:', gymId);
@@ -259,7 +259,7 @@ exports.deleteUser = async (req, res) => {
 exports.logoutUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const gymId = req.user.gymId;
+    const gymId = req.user.gym_id;
     
     console.log('=== LOGGING OUT USER ===');
     console.log('User ID:', id, 'Gym ID:', gymId);

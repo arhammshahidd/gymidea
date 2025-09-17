@@ -1,11 +1,8 @@
 <template>
-  <div class="trainer">
-    <!-- Navbar Component -->
-    <Navbar />
-    
-    <!-- Main Content Area -->
+  <div class="gym-admin-layout">
+    <Sidebar />
     <div class="main-content">
-      <router-view />
+      <router-view :key="$route.fullPath" />
     </div>
   </div>
 </template>
@@ -14,7 +11,7 @@
 import { onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
-import Navbar from '../components/Navbar.vue'
+import Sidebar from '../components/Sidebar.vue'
 
 const authStore = useAuthStore()
 const router = useRouter()
@@ -33,12 +30,16 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.trainer {
-  min-height: 100vh;
-  background: #f5f5f5;
+.gym-admin-layout {
+  display: flex;
+  height: 100vh;
+  background: #f8f9fa;
 }
 
 .main-content {
-  padding-top: 0; /* Navbar handles the top spacing */
+  flex: 1;
+  background: #f8f9fa;
+  overflow-y: auto;
+  margin-left: 280px;
 }
 </style>

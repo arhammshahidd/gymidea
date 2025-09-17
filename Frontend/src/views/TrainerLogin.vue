@@ -55,7 +55,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watchEffect } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
 
@@ -71,6 +71,13 @@ const credentials = ref({
   password: ''
 })
 
+// ✅ Extra Guard inside component, mirroring GymAdminLogin
+watchEffect(() => {
+  if (authStore.isAuthenticated && authStore.role === 'trainer') {
+    router.replace('/trainer/dashboard')
+  }
+})
+
 const handleLogin = async () => {
   loading.value = true
   error.value = ''
@@ -82,8 +89,8 @@ const handleLogin = async () => {
     if (result.success) {
       success.value = 'Login successful! Redirecting...'
       setTimeout(() => {
-        router.push('/trainer')
-      }, 1000)
+        router.push('/trainer/dashboard')
+      }, 200)
     } else {
       error.value = result.message
     }

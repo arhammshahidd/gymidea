@@ -157,7 +157,7 @@ exports.trainerLogin = async (req, res, next) => {
     const token = jwt.signToken({
         id: trainer.id,
         gym_id: trainer.gym_id,
-        role: 'trainer',
+        role: 'TRAINER',
         permissions: trainer.permissions,
       token_version: trainer.token_version || 1
     }, '1d');
@@ -176,7 +176,7 @@ exports.trainerLogin = async (req, res, next) => {
         name: trainer.name,
         phone: trainer.phone,
         email: trainer.email,
-        role: 'trainer',
+        role: 'TRAINER',
         permissions: normalizedPermissions,
       },
     };

@@ -201,7 +201,7 @@
                   
                   <div class="row q-gutter-xs">
                     <q-badge 
-                      :color="card.status === 'Active' ? 'positive' : 'negative'"
+                      :color="(card.status || '').toLowerCase() === 'active' ? 'positive' : 'negative'"
                       :label="card.status || 'Unknown'"
                       class="col-auto"
                     />
@@ -557,7 +557,7 @@ const computedOverviewData = computed(() => {
   }
   
   const totalMembers = userCards.value.length
-  const activeMembers = userCards.value.filter(card => card.status === 'Active').length
+  const activeMembers = userCards.value.filter(card => (card.status || '').toLowerCase() === 'active').length
   const paidMembers = userCards.value.filter(card => card.paymentStatus === 'Paid').length
   const unpaidMembers = userCards.value.filter(card => card.paymentStatus === 'Unpaid').length
   
@@ -725,6 +725,14 @@ const createUserCards = async () => {
       return
     }
     
+    // Helper to normalize user status values
+    const normalizeUserStatus = (status) => {
+      const s = (status || '').toString().toLowerCase()
+      if (s === 'active') return 'Active'
+      if (s === 'inactive') return 'Inactive'
+      return 'Inactive'
+    }
+
     // Create cards for all users first
     allUsers.forEach((user, index) => {
       console.log(`Processing user ${index + 1}:`, user)
@@ -735,7 +743,7 @@ const createUserCards = async () => {
         phone: user.phone || 'N/A',
         membership_tier: user.membership_tier || 'BASIC',
         totalAmount: 0,
-        status: user.status || 'Active',
+        status: normalizeUserStatus(user.status),
         paymentStatus: 'Unpaid', // Default, will be updated based on payments
         payments: []
       })

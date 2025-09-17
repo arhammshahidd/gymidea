@@ -3,10 +3,10 @@ const router = express.Router();
 const knex = require('../config/db');
 const authMiddleware = require('../middleware/authMiddleware');
 
-// Middleware to check if user is GYM_ADMIN or SUPER_ADMIN
+// Middleware to check if user is GYM_ADMIN, SUPER_ADMIN, or TRAINER
 const checkAdminRole = (req, res, next) => {
-  if (req.user.role !== 'GYM_ADMIN' && req.user.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ message: 'Access denied. Only Gym Admins and Super Admins can perform this action.' });
+  if (req.user.role !== 'GYM_ADMIN' && req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'TRAINER') {
+    return res.status(403).json({ message: 'Access denied. Only Gym Admins, Super Admins, and Trainers can perform this action.' });
   }
   next();
 };
@@ -15,24 +15,32 @@ const checkAdminRole = (req, res, next) => {
 router.get('/overview', authMiddleware(), checkAdminRole, async (req, res) => {
   try {
     const gymId = req.user.gym_id || req.user.gymId;
-    
+  
     // Get total amount
     const totalAmountResult = await knex('payment_status')
       .where({ gym_id: gymId })
       .sum('amount as total_amount')
       .first();
     
-    // Get paid members count
-    const paidMembersResult = await knex('payment_status')
-      .where({ gym_id: gymId, payment_status: 'Paid' })
-      .count('* as paid_count')
-      .first();
-    
-    // Get unpaid members count
-    const unpaidMembersResult = await knex('payment_status')
-      .where({ gym_id: gymId, payment_status: 'Unpaid' })
-      .count('* as unpaid_count')
-      .first();
+    // Get paid/unpaid member counts based on each user's latest payment record
+    // This prevents multiple records per user from inflating the counts
+    const latestStatusCounts = await knex.raw(
+      `WITH latest AS (
+        SELECT DISTINCT ON (user_id) user_id, payment_status
+        FROM payment_status
+        WHERE gym_id = ?
+        ORDER BY user_id,
+          COALESCE(payment_date, created_at, updated_at) DESC,
+          id DESC
+      )
+      SELECT 
+        SUM(CASE WHEN LOWER(payment_status) = 'paid' THEN 1 ELSE 0 END) AS paid_count,
+        SUM(CASE WHEN LOWER(payment_status) = 'unpaid' THEN 1 ELSE 0 END) AS unpaid_count
+      FROM latest;`,
+      [gymId]
+    );
+    const paidCount = parseInt(latestStatusCounts.rows?.[0]?.paid_count || 0);
+    const unpaidCount = parseInt(latestStatusCounts.rows?.[0]?.unpaid_count || 0);
     
     // Get all payment records with user details
     const allPaymentsResult = await knex('payment_status as ps')
@@ -57,8 +65,8 @@ router.get('/overview', authMiddleware(), checkAdminRole, async (req, res) => {
       success: true,
       data: {
         total_amount: parseFloat(totalAmountResult.total_amount || 0),
-        paid_members: parseInt(paidMembersResult.paid_count || 0),
-        unpaid_members: parseInt(unpaidMembersResult.unpaid_count || 0),
+        paid_members: paidCount,
+        unpaid_members: unpaidCount,
         payments: allPaymentsResult
       }
     });

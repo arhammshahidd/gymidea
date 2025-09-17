@@ -1,40 +1,51 @@
 <template>
   <div class="user-management">
-    <div class="header">
-      <h2>User Management</h2>
-      <button @click="showCreateUser = true" class="btn-primary">Add New User</button>
-    </div>
+    <q-card flat bordered class="q-pa-md q-mb-md">
+      <div class="row items-center justify-between">
+        <div class="text-h5">User Management</div>
+        <q-btn color="primary" label="Add New User" @click="showCreateUser = true" unelevated />
+      </div>
+    </q-card>
 
     <!-- Statistics Cards -->
-    <div class="stats-grid">
-      <div class="stat-card">
-        <h3>Total Users</h3>
-        <div class="stat-number">{{ userStore.stats.totalUsers }}</div>
-      </div>
-      <div class="stat-card">
-        <h3>Active Users</h3>
-        <div class="stat-number">{{ userStore.stats.totalActiveUsers }}</div>
-      </div>
-      <div class="stat-card">
-        <h3>Inactive Users</h3>
-        <div class="stat-number">{{ userStore.stats.totalInactiveUsers }}</div>
-      </div>
-      <div class="stat-card">
-        <h3>Basic Members</h3>
-        <div class="stat-number">{{ userStore.stats.totalBasicMemberships }}</div>
-      </div>
-      <div class="stat-card">
-        <h3>Premium Members</h3>
-        <div class="stat-number">{{ userStore.stats.totalPremiumMemberships }}</div>
+    <div class="row q-col-gutter-md q-mb-md">
+      <div class="col-12 col-sm-6 col-md-3" v-for="card in statCards" :key="card.label">
+        <q-card flat bordered class="q-pa-md">
+          <div class="row items-center q-gutter-sm">
+            <q-avatar color="primary" text-color="white" icon="analytics" size="32px" />
+            <div>
+              <div class="text-caption text-muted">{{ card.label }}</div>
+              <div class="text-h5">{{ card.value }}</div>
+            </div>
+          </div>
+        </q-card>
       </div>
     </div>
 
     <!-- Users Table -->
     <div class="users-section">
-      <div class="section-header">
-        <h3>Users List</h3>
-        <div class="loading" v-if="userStore.loading">Loading...</div>
-      </div>
+      <q-card flat bordered class="q-pa-md q-mb-md">
+        <div class="row items-center q-col-gutter-md">
+          <div class="col-12 col-md-3">
+            <div class="text-subtitle1">Users List</div>
+            <div class="text-caption" v-if="userStore.loading">Loading...</div>
+          </div>
+          <div class="col-12 col-md-5">
+            <q-input v-model="searchQuery" dense outlined placeholder="Search by name, email or phone">
+              <template v-slot:prepend><q-icon name="search" /></template>
+              <template v-slot:append>
+                <q-icon v-if="searchQuery" name="close" class="cursor-pointer" @click="searchQuery='';" />
+              </template>
+            </q-input>
+          </div>
+          <div class="col-6 col-md-2">
+            <q-select v-model="statusFilter" :options="statusOptions" dense outlined clearable label="Status" />
+          </div>
+          <div class="col-6 col-md-2">
+            <q-select v-model="membershipFilter" :options="membershipOptions" dense outlined clearable label="Membership" />
+          </div>
+        </div>
+      </q-card>
 
       <div v-if="userStore.error" class="error-message">
         {{ userStore.error }}
@@ -46,54 +57,51 @@
       </div>
 
       <div v-else class="users-table">
-        <table>
-          <thead>
-            <tr>
-              <th>User ID</th>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Phone</th>
-              <th>Status</th>
-              <th>Membership</th>
-              <th>Created</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="user in userStore.users" :key="user.id">
-              <td class="user-id-cell">
-                <span class="user-id-badge">#{{ user.id }}</span>
-              </td>
-              <td>{{ user.name }}</td>
-              <td>{{ user.email }}</td>
-              <td>{{ user.phone }}</td>
-              <td>
-                <span :class="['status-badge', user.status.toLowerCase()]">
-                  {{ user.status }}
-                </span>
-              </td>
-              <td>
-                <span :class="['membership-badge', user.membership_tier.toLowerCase()]">
-                  {{ user.membership_tier }}
-                </span>
-              </td>
-              <td>{{ new Date(user.created_at).toLocaleDateString() }}</td>
-              <td class="actions">
-                <button @click="editUser(user)" class="btn-small">Edit</button>
-                <button @click="logoutUser(user.id)" class="btn-small warning">Logout</button>
-                <button @click="deleteUser(user.id)" class="btn-small danger">Delete</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <q-table
+          :rows="filteredRows"
+          :columns="columns"
+          row-key="id"
+          flat bordered
+          :rows-per-page-options="[5,10,20]"
+        >
+          <template v-slot:body-cell-id="props">
+            <q-td :props="props">
+              <q-badge color="primary">#{{ props.row.id }}</q-badge>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-status="props">
+            <q-td :props="props">
+              <q-badge :color="(props.row.status||'').toLowerCase()==='active' ? 'positive' : 'negative'">
+                {{ props.row.status }}
+              </q-badge>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-membership_tier="props">
+            <q-td :props="props">
+              <q-badge :color="props.row.membership_tier==='PREMIUM' ? 'green' : 'blue-grey'" outline>
+                {{ props.row.membership_tier }}
+              </q-badge>
+            </q-td>
+          </template>
+          <template v-slot:body-cell-actions="props">
+            <q-td :props="props">
+              <div class="row q-gutter-xs">
+                <q-btn size="sm" color="primary" flat label="Edit" @click="editUser(props.row)" />
+                <q-btn size="sm" color="orange" flat label="Logout" @click="logoutUser(props.row.id)" />
+                <q-btn size="sm" color="negative" flat label="Delete" @click="deleteUser(props.row.id)" />
+              </div>
+            </q-td>
+          </template>
+        </q-table>
       </div>
     </div>
 
     <!-- Create/Edit User Modal -->
-    <div v-if="showCreateUser || showEditUser" class="modal">
-      <div class="modal-content">
-        <h3>{{ showCreateUser ? 'Add New User' : 'Edit User' }}</h3>
-        <form @submit.prevent="handleSubmit">
+    <q-dialog v-model="showCreateUser">
+      <q-card style="min-width: 500px">
+        <q-card-section class="text-h6">Add New User</q-card-section>
+        <q-card-section>
+          <form @submit.prevent="handleSubmit">
           <div class="form-group">
             <label>Name:</label>
             <input v-model="userForm.name" type="text" required />
@@ -125,20 +133,64 @@
               <option value="PREMIUM">Premium</option>
             </select>
           </div>
-          <div class="form-actions">
-            <button type="submit" :disabled="userStore.loading">
-              {{ userStore.loading ? 'Saving...' : (showCreateUser ? 'Create User' : 'Update User') }}
-            </button>
-            <button type="button" @click="closeModal">Cancel</button>
+          <div class="row justify-end q-gutter-sm q-mt-md">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn color="primary" type="submit" :loading="userStore.loading" :label="userStore.loading ? 'Saving...' : 'Create User'" />
           </div>
-        </form>
-      </div>
-    </div>
+          </form>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
+
+    <q-dialog v-model="showEditUser">
+      <q-card style="min-width: 500px">
+        <q-card-section class="text-h6">Edit User</q-card-section>
+        <q-card-section>
+          <form @submit.prevent="handleSubmit">
+            <div class="form-group">
+              <label>Name:</label>
+              <input v-model="userForm.name" type="text" required />
+            </div>
+            <div class="form-group">
+              <label>Email:</label>
+              <input v-model="userForm.email" type="email" required />
+            </div>
+            <div class="form-group">
+              <label>Phone:</label>
+              <input v-model="userForm.phone" type="text" required />
+            </div>
+            <div class="form-group">
+              <label>Password:</label>
+              <input v-model="userForm.password" type="password" />
+              <small>Leave empty to keep current password</small>
+            </div>
+            <div class="form-group">
+              <label>Status:</label>
+              <select v-model="userForm.status">
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Membership:</label>
+              <select v-model="userForm.membership_tier">
+                <option value="BASIC">Basic</option>
+                <option value="PREMIUM">Premium</option>
+              </select>
+            </div>
+            <div class="row justify-end q-gutter-sm q-mt-md">
+              <q-btn flat label="Cancel" v-close-popup />
+              <q-btn color="primary" type="submit" :loading="userStore.loading" :label="userStore.loading ? 'Saving...' : 'Update User'" />
+            </div>
+          </form>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useUserManagementStore } from '../stores/userManagement'
 
 const userStore = useUserManagementStore()
@@ -160,6 +212,59 @@ onMounted(async () => {
   console.log('=== USER MANAGEMENT COMPONENT MOUNTED ===')
   await userStore.fetchUserStats()
   await userStore.fetchUsers()
+})
+
+// KPI stat cards (keep same values as before)
+const statCards = computed(() => [
+  { label: 'Total Users', value: userStore.stats?.totalUsers || 0 },
+  { label: 'Active Users', value: userStore.stats?.totalActiveUsers || 0 },
+  { label: 'Inactive Users', value: userStore.stats?.totalInactiveUsers || 0 },
+  { label: 'Basic Members', value: userStore.stats?.totalBasicMemberships || 0 },
+  { label: 'Premium Members', value: userStore.stats?.totalPremiumMemberships || 0 }
+])
+
+// q-table columns mirroring previous table headers
+const columns = [
+  { name: 'id', label: 'User ID', field: 'id', align: 'left' },
+  { name: 'name', label: 'Name', field: 'name', align: 'left' },
+  { name: 'email', label: 'Email', field: 'email', align: 'left' },
+  { name: 'phone', label: 'Phone', field: 'phone', align: 'left' },
+  { name: 'status', label: 'Status', field: 'status', align: 'center' },
+  { name: 'membership_tier', label: 'Membership', field: 'membership_tier', align: 'center' },
+  { name: 'created_at', label: 'Created', field: row => new Date(row.created_at).toLocaleDateString(), align: 'left' },
+  { name: 'actions', label: 'Actions', field: 'actions', align: 'right' }
+]
+
+// Filters / search
+const searchQuery = ref('')
+const statusFilter = ref(null)
+const membershipFilter = ref(null)
+const statusOptions = [
+  { label: 'Active', value: 'ACTIVE' },
+  { label: 'Inactive', value: 'INACTIVE' }
+]
+const membershipOptions = [
+  { label: 'Basic', value: 'BASIC' },
+  { label: 'Premium', value: 'PREMIUM' }
+]
+
+const filteredRows = computed(() => {
+  let rows = Array.isArray(userStore.users) ? [...userStore.users] : []
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase()
+    rows = rows.filter(u =>
+      (u.name || '').toLowerCase().includes(q) ||
+      (u.email || '').toLowerCase().includes(q) ||
+      (u.phone || '').toLowerCase().includes(q)
+    )
+  }
+  if (statusFilter.value) {
+    rows = rows.filter(u => (u.status || '').toUpperCase() === statusFilter.value)
+  }
+  if (membershipFilter.value) {
+    rows = rows.filter(u => (u.membership_tier || '').toUpperCase() === membershipFilter.value)
+  }
+  return rows
 })
 
 const editUser = (user) => {

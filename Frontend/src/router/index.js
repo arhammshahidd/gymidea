@@ -166,7 +166,16 @@ const router = createRouter({
     {
       path: '/trainer-login',
       name: 'TrainerLogin',
-      component: () => import('../views/TrainerLogin.vue')
+      component: () => import('../views/TrainerLogin.vue'),
+      // ✅ Mirror GymAdminLogin guard for trainers
+      beforeEnter: (to, from, next) => {
+        const authStore = useAuthStore()
+        if (authStore.isAuthenticated && authStore.role === 'trainer') {
+          next({ name: 'TrainerDashboard' })
+        } else {
+          next()
+        }
+      }
     },
     {
       path: '/user-login',
@@ -198,10 +207,9 @@ const router = createRouter({
     },
     {
       path: '/gym-admin',
-      name: 'GymAdmin',
       component: () => import('../views/GymAdmin.vue'),
       children: [
-        { path: '', redirect: 'dashboard' },
+        { path: '', name: 'GymAdmin', redirect: 'dashboard' },
         {
           path: 'dashboard',
           name: 'GymAdminDashboard',
@@ -246,10 +254,9 @@ const router = createRouter({
     },
     {
       path: '/trainer',
-      name: 'Trainer',
       component: () => import('../views/Trainer.vue'),
       children: [
-        { path: '', redirect: 'dashboard' },
+        { path: '', name: 'Trainer', redirect: 'dashboard' },
         {
           path: 'dashboard',
           name: 'TrainerDashboard',

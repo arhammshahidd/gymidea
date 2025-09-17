@@ -40,6 +40,18 @@
           </form>
         </div>
 
+        <!-- Appearance -->
+        <div v-if="activeTab === 'appearance'" class="settings-section">
+          <h3>Appearance</h3>
+          <div class="setting-item">
+            <label>Theme</label>
+            <div style="display:flex; gap:12px; align-items:center;">
+              <button class="btn-primary" @click="setTheme('light')" :disabled="currentTheme==='light'">Light Mode</button>
+              <button class="btn-primary" @click="setTheme('dark')" :disabled="currentTheme==='dark'">Dark Mode</button>
+            </div>
+            <p class="text-muted">Theme preference is saved per user account.</p>
+          </div>
+        </div>
         <!-- Security Settings -->
         <div v-if="activeTab === 'security'" class="settings-section">
           <h3>Security Settings</h3>
@@ -207,7 +219,8 @@ const tabs = [
   { key: 'security', name: 'Security' },
   { key: 'gym', name: 'Gym Settings' },
   { key: 'notifications', name: 'Notifications' },
-  { key: 'system', name: 'System' }
+  { key: 'system', name: 'System' },
+  { key: 'appearance', name: 'Appearance' }
 ]
 
 const profileForm = ref({
@@ -246,8 +259,11 @@ const systemSettings = ref({
   language: 'en'
 })
 
+const currentTheme = ref('light')
+
 onMounted(() => {
   loadSettings()
+  loadUserTheme()
 })
 
 const loadSettings = () => {
@@ -360,6 +376,39 @@ const updateSystemSettings = async () => {
   } catch (error) {
     console.error('Error updating system settings:', error)
     loading.value = false
+  }
+}
+
+const loadUserTheme = () => {
+  if (authStore.user) {
+    const userThemeKey = `theme_${authStore.user.id}_${authStore.user.role}`
+    const savedTheme = localStorage.getItem(userThemeKey)
+    if (savedTheme) {
+      currentTheme.value = savedTheme
+      applyTheme(savedTheme)
+    } else {
+      // Default to light theme if no saved preference
+      currentTheme.value = 'light'
+      applyTheme('light')
+    }
+  }
+}
+
+const applyTheme = (mode) => {
+  const root = document.documentElement
+  if (mode === 'dark') {
+    root.classList.add('dark')
+  } else {
+    root.classList.remove('dark')
+  }
+}
+
+const setTheme = (mode) => {
+  if (authStore.user) {
+    const userThemeKey = `theme_${authStore.user.id}_${authStore.user.role}`
+    currentTheme.value = mode
+    applyTheme(mode)
+    localStorage.setItem(userThemeKey, mode)
   }
 }
 </script>

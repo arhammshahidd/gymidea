@@ -150,6 +150,9 @@ export const useAuthStore = defineStore('auth', {
       localStorage.setItem('role', role)
       if (gymId) localStorage.setItem('gymId', gymId)
       
+      // Apply user-specific theme
+      this.applyUserTheme()
+      
       // Authorization header is handled by axios interceptor
     },
 
@@ -183,7 +186,25 @@ export const useAuthStore = defineStore('auth', {
         this.gymId = gymId
         this.isAuthenticated = true
         
+        // Apply user-specific theme
+        this.applyUserTheme()
+        
         // Authorization header is handled by axios interceptor
+      }
+    },
+
+    // Apply user-specific theme
+    applyUserTheme() {
+      if (this.user) {
+        const userThemeKey = `theme_${this.user.id}_${this.role}`
+        const savedTheme = localStorage.getItem(userThemeKey)
+        const root = document.documentElement
+        
+        if (savedTheme === 'dark') {
+          root.classList.add('dark')
+        } else {
+          root.classList.remove('dark')
+        }
       }
     }
   }

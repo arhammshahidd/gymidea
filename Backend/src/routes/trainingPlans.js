@@ -3,9 +3,9 @@ const router = express.Router();
 const ctrl = require('../controllers/TrainingPlanController');
 const auth = require('../middleware/authMiddleware');
 
-// All routes restricted to GYM_ADMIN for now. Adjust if trainers should access.
-router.get('/', auth('gym_admin'), ctrl.list);
-router.get('/my-assignments', auth('gym_admin'), ctrl.getMyAssignments); // New route for My Assign feature
+// Allow trainers to read; restrict mutations to GYM_ADMIN
+router.get('/', auth(), ctrl.list);
+router.get('/my-assignments', auth(), ctrl.getMyAssignments); // trainers can access their assignments
 router.post('/', auth('gym_admin'), ctrl.create);
 router.get('/:id', auth('gym_admin'), ctrl.get);
 router.put('/:id', auth('gym_admin'), ctrl.update);

@@ -12,6 +12,8 @@ import 'quasar/src/css/index.sass'
 import App from './App.vue'
 import router from './router'
 
+// Theme will be applied per user after login
+
 const app = createApp(App)
 const pinia = createPinia()
 

@@ -20,6 +20,9 @@ const checkTokenVersion = async (decoded, db) => {
     case 'GYM_ADMIN':
       tableName = 'gym_admins';
       break;
+    case 'TRAINER':
+      tableName = 'trainers';
+      break;
     case 'USER':
       tableName = 'users';
       break;

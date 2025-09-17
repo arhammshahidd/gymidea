@@ -45,7 +45,7 @@
             <div class="kpi-content">
               <div class="kpi-info">
                 <div class="kpi-label">Paid Users</div>
-                <div class="kpi-value">{{ paymentStatusStore.overview.paid_members || 0 }}</div>
+                <div class="kpi-value">{{ paidUsersCard }}</div>
               </div>
               
             </div>
@@ -58,7 +58,7 @@
             <div class="kpi-content">
               <div class="kpi-info">
                 <div class="kpi-label">Unpaid Users</div>
-                <div class="kpi-value">{{ paymentStatusStore.overview.unpaid_members || 0 }}</div>
+                <div class="kpi-value">{{ unpaidUsersCard }}</div>
               </div>
              
             </div>
@@ -339,6 +339,61 @@ onMounted(async () => {
     console.error('Failed to load dashboard KPIs', e)
   }
 })
+
+// Derive latest status per user from payments array in overview (fallback to backend counts)
+const paidUsersCount = computed(() => {
+  const payments = paymentStatusStore.overview?.payments
+  const totalUsers = userManagementStore.stats?.totalUsers || 0
+  if (Array.isArray(payments) && payments.length > 0) {
+    const seen = new Set()
+    const hasPaid = new Set()
+    for (const p of payments) {
+      const uid = p?.user_id
+      if (!uid) continue
+      seen.add(uid)
+      if ((p.payment_status || '').toLowerCase() === 'paid') {
+        hasPaid.add(uid)
+      }
+    }
+    // Count paid users by any paid record
+    const paid = hasPaid.size
+    // If there are users with no payments at all, they are not counted here; unpaid calc compensates
+    return paid
+  }
+  // No payments available; fall back to 0 to mirror Payment Status page behavior
+  return 0
+})
+
+const unpaidUsersCount = computed(() => {
+  const totalUsers = userManagementStore.stats?.totalUsers || 0
+  const payments = paymentStatusStore.overview?.payments
+  if (Array.isArray(payments) && payments.length > 0) {
+    const seen = new Set()
+    const hasPaid = new Set()
+    for (const p of payments) {
+      const uid = p?.user_id
+      if (!uid) continue
+      seen.add(uid)
+      if ((p.payment_status || '').toLowerCase() === 'paid') {
+        hasPaid.add(uid)
+      }
+    }
+    const paid = hasPaid.size
+    // Users without any payments are considered unpaid
+    const unpaid = Math.max(totalUsers - paid, 0)
+    return unpaid
+  }
+  // If no payments, all users are unpaid
+  return totalUsers
+})
+
+// Card-safe values: always numbers
+const toNumber = (val) => {
+  const n = Number(val)
+  return Number.isFinite(n) ? n : 0
+}
+const paidUsersCard = computed(() => toNumber(paidUsersCount.value))
+const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
 </script>
 
 <style scoped>

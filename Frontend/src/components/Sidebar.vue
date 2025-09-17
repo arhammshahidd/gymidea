@@ -29,7 +29,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
@@ -40,55 +40,55 @@ const authStore = useAuthStore()
 const drawerOpen = ref(true)
 const currentModule = ref('')
 
-// All possible menu items
+// All possible menu items (role-aware routes)
 const allMenuItems = ref([
   {
     key: 'dashboard',
     label: 'Dashboard',
     icon: '📊',
-    route: '/gym-admin/dashboard',
+    route: computed(() => authStore.role === 'trainer' ? '/trainer/dashboard' : '/gym-admin/dashboard'),
     permission: 'Dashboard'
   },
   {
     key: 'user-management',
     label: 'User Management',
     icon: '👥',
-    route: '/gym-admin/user-management',
+    route: computed(() => authStore.role === 'trainer' ? '/trainer/user-management' : '/gym-admin/user-management'),
     permission: 'User Management'
   },
   {
     key: 'trainer-management',
     label: 'Trainer Management',
     icon: '🏋️‍♂️',
-    route: '/gym-admin/trainer-management',
+    route: computed(() => authStore.role === 'trainer' ? '/trainer/trainer-management' : '/gym-admin/trainer-management'),
     permission: 'Trainer Management'
   },
   {
     key: 'payment-status',
     label: 'Payment Status',
     icon: '📄',
-    route: '/gym-admin/payment-status',
+    route: computed(() => authStore.role === 'trainer' ? '/trainer/payment-status' : '/gym-admin/payment-status'),
     permission: 'Payment Status'
   },
   {
     key: 'food-menu',
     label: 'Food Menus',
     icon: '🍽️',
-    route: '/gym-admin/food-menu',
+    route: computed(() => authStore.role === 'trainer' ? '/trainer/food-menu' : '/gym-admin/food-menu'),
     permission: 'Food Menu'
   },
   {
     key: 'trainer-scheduler',
     label: 'Stats & Training Schedules',
     icon: '📊',
-    route: '/gym-admin/trainer-scheduler',
+    route: computed(() => authStore.role === 'trainer' ? '/trainer/trainer-scheduler' : '/gym-admin/trainer-scheduler'),
     permission: 'Trainer Scheduler'
   },
   {
     key: 'settings',
     label: 'Settings',
     icon: '⚙️',
-    route: '/gym-admin/settings',
+    route: computed(() => authStore.role === 'trainer' ? '/trainer/settings' : '/gym-admin/settings'),
     permission: 'Settings'
   }
 ])
@@ -99,9 +99,12 @@ const menuItems = computed(() => {
     return []
   }
   
-  return allMenuItems.value.filter(item => 
-    authStore.user.permissions.includes(item.permission)
-  )
+  return allMenuItems.value
+    .filter(item => authStore.user.permissions?.includes(item.permission))
+    .map(item => {
+      const routePath = typeof item.route === 'string' ? item.route : item.route.value
+      return { ...item, route: routePath, isActive: computed(() => route.path.startsWith(routePath)) }
+    })
 })
 
 // Set current module based on route
@@ -160,6 +163,11 @@ onMounted(() => {
   
   setCurrentModuleFromRoute()
 })
+
+// Keep highlight in sync when navigating
+watch(() => route.path, () => {
+  setCurrentModuleFromRoute()
+}, { immediate: true })
 </script>
 
 <style scoped>

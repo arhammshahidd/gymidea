@@ -1,15 +1,17 @@
 <template>
   <div class="trainer-management-page">
-    <div class="page-header">
-      <h1>Trainer Management</h1>
-      <p>Manage your gym trainers and their permissions</p>
-    </div>
+    <q-card flat bordered class="q-pa-md q-mb-md">
+      <div class="text-h5">Trainer Management</div>
+      <div class="text-caption">Manage your gym trainers and their permissions</div>
+    </q-card>
 
     <div class="page-content">
-      <div class="content-header">
-        <button @click="showCreateTrainer = true" class="btn-primary">Add New Trainer</button>
-        <button @click="fetchTrainers" class="btn-secondary">Refresh</button>
-      </div>
+      <q-card flat bordered class="q-pa-md q-mb-md">
+        <div class="row q-gutter-sm">
+          <q-btn color="primary" label="Add New Trainer" @click="showCreateTrainer = true" unelevated />
+          <q-btn color="secondary" label="Refresh" @click="fetchTrainers" flat />
+        </div>
+      </q-card>
 
       <div v-if="loading" class="loading">Loading trainers...</div>
       
@@ -17,50 +19,44 @@
         <p>No trainers found. Add your first trainer!</p>
       </div>
 
-      <div v-else class="trainers-grid">
-        <div v-for="trainer in trainers" :key="trainer.id" class="trainer-card">
-          <div class="trainer-header">
-            <h3>{{ trainer.name }}</h3>
-            <span class="trainer-status" :class="trainer.status?.toLowerCase()">
-              {{ trainer.status || 'Active' }}
-            </span>
-          </div>
-          
-          <div class="trainer-info">
-            <p><strong>Email:</strong> {{ trainer.email }}</p>
-            <p><strong>Phone:</strong> {{ trainer.phone }}</p>
-            <p><strong>Gym ID:</strong> {{ trainer.gym_id }}</p>
-          </div>
-
-          <div class="trainer-permissions">
-            <h4>Permissions:</h4>
-            <div class="permissions-list">
-              <span 
-                v-for="permission in trainer.permissions || []" 
-                :key="permission" 
-                class="permission-tag"
-              >
-                {{ permission }}
-              </span>
-              <span v-if="!trainer.permissions?.length" class="no-permissions">
-                No permissions assigned
-              </span>
-            </div>
-          </div>
-
-          <div class="trainer-actions">
-            <button @click="editTrainer(trainer)" class="btn-small">Edit</button>
-            <button @click="deleteTrainer(trainer.id)" class="btn-small danger">Delete</button>
+      <div v-else>
+        <div class="row q-col-gutter-md">
+          <div class="col-12 col-md-6 col-lg-4" v-for="trainer in trainers" :key="trainer.id">
+            <q-card flat bordered class="q-pa-md">
+              <div class="row items-center justify-between q-mb-sm">
+                <div class="text-subtitle1">{{ trainer.name }}</div>
+                <q-badge :color="(trainer.status||'').toLowerCase()==='active' ? 'positive' : 'negative'">
+                  {{ trainer.status || 'Active' }}
+                </q-badge>
+              </div>
+              <div class="q-mb-sm">
+                <div class="text-caption">Email: {{ trainer.email }}</div>
+                <div class="text-caption">Phone: {{ trainer.phone }}</div>
+                <div class="text-caption">Gym ID: {{ trainer.gym_id }}</div>
+              </div>
+              <div class="q-mb-sm">
+                <div class="text-caption q-mb-xs">Permissions:</div>
+                <div class="row q-gutter-xs">
+                  <q-badge v-for="p in trainer.permissions || []" :key="p" color="blue-grey" outline>{{ p }}</q-badge>
+                  <span v-if="!trainer.permissions?.length" class="text-caption text-muted">No permissions assigned</span>
+                </div>
+              </div>
+              <div class="row justify-end q-gutter-xs">
+                <q-btn size="sm" color="primary" flat label="Edit" @click="editTrainer(trainer)" />
+                <q-btn size="sm" color="negative" flat label="Delete" @click="deleteTrainer(trainer.id)" />
+              </div>
+            </q-card>
           </div>
         </div>
       </div>
     </div>
 
     <!-- Create/Edit Trainer Modal -->
-    <div v-if="showCreateTrainer || showEditTrainer" class="modal">
-      <div class="modal-content">
-        <h3>{{ showCreateTrainer ? 'Add New Trainer' : 'Edit Trainer' }}</h3>
-        <form @submit.prevent="handleSubmit">
+    <q-dialog v-model="showCreateTrainer">
+      <q-card style="min-width: 500px">
+        <q-card-section class="text-h6">Add New Trainer</q-card-section>
+        <q-card-section>
+          <form @submit.prevent="handleSubmit">
           <div class="form-group">
             <label>Trainer Name:</label>
             <input v-model="trainerForm.name" type="text" required />
@@ -91,15 +87,54 @@
               </label>
             </div>
           </div>
-          <div class="form-actions">
-            <button type="submit" :disabled="loading">
-              {{ loading ? 'Saving...' : (showCreateTrainer ? 'Create Trainer' : 'Update Trainer') }}
-            </button>
-            <button type="button" @click="closeModal">Cancel</button>
+          <div class="row justify-end q-gutter-sm q-mt-md">
+            <q-btn flat label="Cancel" v-close-popup />
+            <q-btn color="primary" type="submit" :loading="loading" :label="loading ? 'Saving...' : 'Create Trainer'" />
           </div>
-        </form>
-      </div>
-    </div>
+          </form>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
+
+    <q-dialog v-model="showEditTrainer">
+      <q-card style="min-width: 500px">
+        <q-card-section class="text-h6">Edit Trainer</q-card-section>
+        <q-card-section>
+          <form @submit.prevent="handleSubmit">
+            <div class="form-group">
+              <label>Trainer Name:</label>
+              <input v-model="trainerForm.name" type="text" required />
+            </div>
+            <div class="form-group">
+              <label>Phone:</label>
+              <input v-model="trainerForm.phone" type="text" required />
+            </div>
+            <div class="form-group">
+              <label>Email:</label>
+              <input v-model="trainerForm.email" type="email" required />
+            </div>
+            <div class="form-group">
+              <label>Password:</label>
+              <input v-model="trainerForm.password" type="password" />
+              <small>Leave empty to keep current password</small>
+            </div>
+            <div class="form-group">
+              <label>Permissions (from your available modules):</label>
+              <div class="permissions">
+                <label v-for="permission in authStore.user?.permissions || []" :key="permission">
+                  <input type="checkbox" :value="permission" v-model="trainerForm.permissions" />
+                  {{ permission }}
+                </label>
+              </div>
+            </div>
+            <div class="row justify-end q-gutter-sm q-mt-md">
+              <q-btn flat label="Cancel" v-close-popup />
+              <q-btn color="primary" type="submit" :loading="loading" :label="loading ? 'Saving...' : 'Update Trainer'" />
+            </div>
+          </form>
+        </q-card-section>
+      </q-card>
+    </q-dialog>
   </div>
 </template>
 

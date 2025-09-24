@@ -2,7 +2,7 @@ const db = require('../config/db');
 
 exports.createPlan = async (req, res) => {
   try {
-    const { user_id, start_date, end_date, exercise_plan_category, total_workouts, training_minutes, items = [] } = req.body;
+    const { user_id, start_date, end_date, exercise_plan_category, total_workouts, total_exercises, training_minutes, items = [] } = req.body;
     const gymId = req.user?.gym_id ?? null;
 
     if (!user_id || !start_date || !end_date || !exercise_plan_category) {
@@ -11,7 +11,7 @@ exports.createPlan = async (req, res) => {
 
     // Insert plan
     const [plan] = await db('app_manual_training_plans')
-      .insert({ user_id, gym_id: gymId, start_date, end_date, exercise_plan_category, total_workouts: total_workouts || 0, training_minutes: training_minutes || 0 })
+      .insert({ user_id, gym_id: gymId, start_date, end_date, exercise_plan_category, total_workouts: total_workouts || 0, total_exercises: total_exercises || 0, training_minutes: training_minutes || 0 })
       .returning('*');
 
     // Insert items if provided
@@ -19,10 +19,13 @@ exports.createPlan = async (req, res) => {
       const rows = items.map((it) => ({
         plan_id: plan.id,
         workout_name: it.workout_name,
+        exercise_plan_category: it.exercise_plan_category || null,
+        exercise_types: it.exercise_types || null,
         sets: it.sets || 0,
         reps: it.reps || 0,
         weight_kg: it.weight_kg || 0,
         minutes: it.minutes || 0,
+        user_level: it.user_level || 'Beginner',
       }));
       await db('app_manual_training_plan_items').insert(rows);
     }
@@ -37,14 +40,14 @@ exports.createPlan = async (req, res) => {
 exports.updatePlan = async (req, res) => {
   try {
     const { id } = req.params;
-    const { start_date, end_date, exercise_plan_category, total_workouts, training_minutes, items } = req.body;
+    const { start_date, end_date, exercise_plan_category, total_workouts, total_exercises, training_minutes, items } = req.body;
 
     const existing = await db('app_manual_training_plans').where({ id }).first();
     if (!existing) return res.status(404).json({ success: false, message: 'Plan not found' });
 
     const [updated] = await db('app_manual_training_plans')
       .where({ id })
-      .update({ start_date, end_date, exercise_plan_category, total_workouts, training_minutes, updated_at: new Date() })
+      .update({ start_date, end_date, exercise_plan_category, total_workouts, total_exercises, training_minutes, updated_at: new Date() })
       .returning('*');
 
     if (Array.isArray(items)) {
@@ -53,10 +56,13 @@ exports.updatePlan = async (req, res) => {
         const rows = items.map((it) => ({
           plan_id: id,
           workout_name: it.workout_name,
+          exercise_plan_category: it.exercise_plan_category || null,
+          exercise_types: it.exercise_types || null,
           sets: it.sets || 0,
           reps: it.reps || 0,
           weight_kg: it.weight_kg || 0,
           minutes: it.minutes || 0,
+          user_level: it.user_level || 'Beginner',
         }));
         await db('app_manual_training_plan_items').insert(rows);
       }

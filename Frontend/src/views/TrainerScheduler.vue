@@ -1,5 +1,60 @@
 <template>
   <div class="trainer-scheduler-page">
+    <!-- Approval Training Section -->
+    <div class="section">
+      <div class="section-header">
+        <h2>Approval Training</h2>
+        <div class="search-container" style="width: 420px">
+          <q-input
+            v-model="approvalSearch"
+            placeholder="Search training by name"
+            outlined
+            dense
+            class="search-input"
+          >
+            <template v-slot:prepend>
+              <q-icon name="search" />
+            </template>
+          </q-input>
+        </div>
+      </div>
+
+      <div class="training-cards-grid">
+        <q-card
+          v-for="ap in filteredApprovals"
+          :key="ap.id"
+          class="training-card"
+          flat
+          bordered
+        >
+          <q-card-section>
+            <div class="card-header">
+              <div>
+                <div class="text-subtitle1">{{ ap.workout_name }}</div>
+                <div class="text-caption">User: {{ ap.user_name }}</div>
+              </div>
+              <q-badge :color="ap.approval_status === 'APPROVED' ? 'green' : (ap.approval_status === 'REJECTED' ? 'red' : 'orange')" :label="ap.approval_status" />
+            </div>
+
+            <div class="other-details-section">
+              <div class="detail-row">
+                <span><strong>Total Days:</strong> {{ calculateDuration(ap.start_date, ap.end_date) }}</span>
+                <span><strong>Total Exercises:</strong> {{ ap.total_workouts || 0 }}</span>
+              </div>
+            </div>
+
+            <div class="q-mt-md">
+              <q-btn color="primary" label="View" @click="openApprovalDetails(ap.id)" />
+            </div>
+          </q-card-section>
+        </q-card>
+      </div>
+
+      <div v-if="filteredApprovals.length === 0" class="no-plans">
+        <q-icon name="assignment" size="48px" color="grey-5" />
+        <p>No pending approvals</p>
+      </div>
+    </div>
     <div class="page-header">
       <h1>Trainer Scheduler</h1>
       <p>Manage training plans and user assignments</p>
@@ -138,7 +193,7 @@
 
             <q-select
               v-model="selectedCategory"
-              :options="categoryOptions"
+              :options="assignmentCategoryOptions"
               label="Select Training Plan Category"
               outlined
               dense
@@ -239,7 +294,7 @@
           </div>
 
                <!-- Other Details Section -->
-               <div class="other-details-section">
+              <div class="other-details-section">
                  <div class="detail-row">
                    <span><strong>Start Date:</strong> {{ plan.start_date }}</span>
                    <span><strong>End Date:</strong> {{ plan.end_date }}</span>
@@ -328,11 +383,11 @@
                    color="red"
                    icon="delete"
                    size="sm"
-                   @click="deleteTrainingPlan(plan.id)"
-                   title="Delete Plan"
+                   @click="deleteTrainingPlan(plan.id, true)"
+                   title="Unassign Plan"
                  />
-          </div>
-          </div>
+               </div>
+             </div>
 
              <div class="card-content">
                <!-- Workout Names Section -->
@@ -357,6 +412,10 @@
 
                <!-- Other Details Section -->
                <div class="other-details-section">
+                 <div class="detail-row">
+                   <span><strong>User:</strong> {{ getUserName(plan.user_id) }}</span>
+                   <span><strong>Phone:</strong> {{ getUserPhone(plan.user_id) }}</span>
+                 </div>
                  <div class="detail-row">
                    <span><strong>Start Date:</strong> {{ plan.start_date }}</span>
                    <span><strong>End Date:</strong> {{ plan.end_date }}</span>
@@ -436,6 +495,14 @@
                 v-model="newPlan.category"
                 :options="categoryOptions"
                 label="Exercise Plan Category"
+                outlined
+                dense
+                class="form-field"
+              />
+              <q-select
+                v-model="newPlan.user_level"
+                :options="userLevelOptions"
+                label="User Level"
                 outlined
                 dense
                 class="form-field"
@@ -820,6 +887,69 @@
       </q-card>
      </q-dialog>
 
+  <!-- Approval Details Dialog -->
+  <q-dialog v-model="showApprovalDetails">
+    <q-card style="min-width: 900px; max-width: 1100px">
+      <q-card-section>
+        <div class="text-h5" style="text-align:center">Training Approval Details</div>
+        <div class="text-caption" style="text-align:center">Review and approve the training plan</div>
+      </q-card-section>
+
+      <q-card-section class="q-pt-none">
+        <div class="training-cards-grid">
+          <q-card v-for="ex in (approvalDetails?.exercises_details ? JSON.parse(approvalDetails.exercises_details) : [])" :key="ex.name" flat bordered>
+            <q-card-section>
+              <div class="text-subtitle1">{{ ex.name }}</div>
+              <div class="text-caption">Reps</div>
+              <div>{{ ex.reps }}</div>
+              <div class="text-caption q-mt-sm">Sets</div>
+              <div>{{ ex.sets }}</div>
+              <div class="text-caption q-mt-sm">Weight</div>
+              <div>{{ ex.weight }} <span v-if="ex.weight">kg</span></div>
+              <div class="text-caption q-mt-sm">Training Minutes</div>
+              <div>{{ ex.training_minutes }}</div>
+            </q-card-section>
+          </q-card>
+        </div>
+
+        <q-card flat bordered class="q-mt-md">
+          <q-card-section>
+            <div class="text-subtitle1">Plan Summary</div>
+            <div class="row q-col-gutter-lg q-mt-md">
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Name</div>
+                <div>{{ approvalDetails?.user_name }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Contact Number</div>
+                <div>{{ approvalDetails?.user_phone }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Exercise Plan Name</div>
+                <div>{{ approvalDetails?.category }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Total Exercises</div>
+                <div>{{ approvalDetails?.total_workouts || 0 }}</div>
+              </div>
+            </div>
+            <div class="row q-col-gutter-lg q-mt-md">
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Total Training Minutes</div>
+                <div>{{ approvalDetails?.total_training_minutes || 0 }}</div>
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
+      </q-card-section>
+
+      <q-card-actions align="right">
+        <q-btn flat label="Reject" color="negative" @click="rejectRequest(approvalDetails.id)" />
+        <q-btn unelevated label="Approve" color="positive" @click="approveRequest(approvalDetails.id)" />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+
      <!-- Training Plan Assignment Success Dialog -->
      <q-dialog v-model="showAssignmentDialog" persistent>
        <q-card style="min-width: 400px; max-width: 500px">
@@ -848,6 +978,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useUserManagementStore } from '../stores/userManagement'
 import { useAuthStore } from '../stores/auth'
 import api from '../config/axios'
+import { io } from 'socket.io-client'
 
 // Stores
 const userManagementStore = useUserManagementStore()
@@ -866,6 +997,8 @@ const creatingPlan = ref(false)
 const updatingPlan = ref(false)
 const trainingPlans = ref([])
 const myAssignments = ref([])
+const approvals = ref([])
+const approvalSearch = ref('')
 const userStats = ref(null)
 const selectedUserForStats = ref(null)
 const editingPlan = ref({})
@@ -876,6 +1009,7 @@ const newPlan = ref({
   end_date: '',
   workout_name: '',
   category: '',
+  user_level: 'Beginner',
   total_workouts: 0,
   training_minutes: 0,
   sets: 0,
@@ -943,12 +1077,11 @@ const userColumns = [
   }
 ]
 
-// Category options
-const categoryOptions = [
-  'Muscle Gain',
-  'Muscle Lose',
-  'Strength'
-]
+// Category options used for the Create Plan form
+const categoryOptions = [ 'Muscle Gain', 'Muscle Lose', 'Strength' ]
+
+// User level options
+const userLevelOptions = [ 'Beginner', 'Intermediate', 'Expert' ]
 
 // Trainer options (you can fetch this from an API or store)
 const trainerOptions = ref([
@@ -968,11 +1101,26 @@ const filteredUsers = computed(() => {
   )
 })
 
-const allTrainingPlans = computed(() => {
-  // Only show unassigned training plans in the main section
-  // Assigned plans should only appear in "My Assignments"
-  const unassignedPlans = trainingPlans.value.filter(plan => !plan.assign_to)
-  return unassignedPlans
+const allTrainingPlans = computed(() => trainingPlans.value)
+
+// Only show categories that exist in unassigned, created plans (for assignment)
+const assignmentCategoryOptions = computed(() => {
+  const set = new Set(
+    trainingPlans.value
+      .filter(p => !p.assign_to)
+      .map(p => p.category)
+      .filter(Boolean)
+  )
+  return Array.from(set)
+})
+
+const filteredApprovals = computed(() => {
+  if (!approvalSearch.value) return approvals.value
+  const q = approvalSearch.value.toLowerCase()
+  return approvals.value.filter(a =>
+    a.workout_name?.toLowerCase().includes(q) ||
+    a.user_name?.toLowerCase().includes(q)
+  )
 })
 
 const userOptions = computed(() => {
@@ -1095,60 +1243,75 @@ const viewTrainingPlanDetails = (plan) => {
   showStatsDialog.value = true
 }
 
+// Approval details dialog state
+const showApprovalDetails = ref(false)
+const approvalDetails = ref(null)
+
+const openApprovalDetails = async (id) => {
+  try {
+    const { data } = await api.get(`/trainingApprovals/${id}`)
+    approvalDetails.value = data.data
+    showApprovalDetails.value = true
+  } catch (e) {
+    console.error('Failed to load approval details', e)
+  }
+}
+
+const approveRequest = async (id) => {
+  try {
+    await api.patch(`/trainingApprovals/${id}/status`, { approval_status: 'APPROVED' })
+    await loadApprovals()
+    showApprovalDetails.value = false
+  } catch (e) {
+    console.error('Failed to approve request', e)
+  }
+}
+
+const rejectRequest = async (id) => {
+  try {
+    await api.patch(`/trainingApprovals/${id}/status`, { approval_status: 'REJECTED' })
+    await loadApprovals()
+    showApprovalDetails.value = false
+  } catch (e) {
+    console.error('Failed to reject request', e)
+  }
+}
+
 const assignTraining = async () => {
-  if (selectedUser.value && selectedCategory.value) {
-    try {
-      // Get user name for the dialog
-      const selectedUserData = userManagementStore.users.find(user => user.id === selectedUser.value)
-      const userName = selectedUserData ? selectedUserData.name : 'Unknown User'
-      
-      // Create a detailed training plan for the user with default exercises
-      const defaultExercises = getDefaultExercisesForCategory(selectedCategory.value)
-      const totalWorkouts = defaultExercises.length
-      const totalTrainingMinutes = defaultExercises.reduce((sum, ex) => sum + ex.training_minutes, 0)
-      const totalSets = defaultExercises.reduce((sum, ex) => sum + ex.sets, 0)
-      const totalReps = defaultExercises.reduce((sum, ex) => sum + ex.reps, 0)
-      const totalWeight = defaultExercises.reduce((sum, ex) => sum + ex.weight, 0)
-      
-      const planData = {
-        user_id: selectedUser.value,
-        gym_id: authStore.user?.gym_id,
-        trainer_id: authStore.user?.id,
-        start_date: new Date().toISOString().split('T')[0], // Today's date
-        end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days from now
-        category: selectedCategory.value,
-        workout_name: defaultExercises.map(ex => ex.name).join(', '),
-        total_workouts: totalWorkouts,
-        training_minutes: totalTrainingMinutes,
-        sets: totalSets,
-        reps: totalReps,
-        weight_kg: totalWeight,
-        assign_to: authStore.user?.id, // Assign to current trainer
-        status: 'PLANNED',
-        exercises_details: JSON.stringify(defaultExercises)
-      }
-      
-      const response = await api.post('/trainingPlans/', planData)
-      trainingPlans.value.push(response.data.data)
-      
-      // Show success dialog
-      assignedUserName.value = userName
-      showAssignmentDialog.value = true
-      
-      // Auto-close dialog after 2 seconds
-    setTimeout(() => {
-        showAssignmentDialog.value = false
-      }, 2000)
-      
-      // Reset form
-      selectedUser.value = null
-      selectedCategory.value = null
-      
-      // Refresh the training plans list
-      await loadTrainingPlans()
-  } catch (error) {
-      console.error('Error assigning training plan:', error)
+  if (!selectedUser.value || !selectedCategory.value) return
+  try {
+    // Get the most recent unassigned plan for the chosen category
+    const candidatePlans = trainingPlans.value
+      .filter(p => p.category === selectedCategory.value && !p.assign_to)
+      .sort((a, b) => new Date(b.created_at || b.id) - new Date(a.created_at || a.id))
+
+    const planToAssign = candidatePlans[0]
+    if (!planToAssign) {
+      alert('No available plan found for the selected category. Please create a plan first.')
+      return
     }
+
+    // Update the existing plan: set user_id and assign_to; keep exercises/details intact
+    await api.put(`/trainingPlans/${planToAssign.id}`, {
+      user_id: selectedUser.value,
+      assign_to: authStore.user?.id,
+      status: planToAssign.status || 'PLANNED'
+    })
+
+    // Show success dialog
+    const selectedUserData = userManagementStore.users.find(u => u.id === selectedUser.value)
+    assignedUserName.value = selectedUserData ? selectedUserData.name : 'User'
+    showAssignmentDialog.value = true
+    setTimeout(() => { showAssignmentDialog.value = false }, 2000)
+
+    // Reset UI and refresh lists
+    selectedUser.value = null
+    selectedCategory.value = null
+    await loadTrainingPlans()
+    await loadMyAssignments()
+  } catch (error) {
+    console.error('Error assigning training plan:', error)
+    alert('Failed to assign training plan: ' + (error.response?.data?.message || error.message))
   }
 }
 
@@ -1263,15 +1426,30 @@ const createPlan = async () => {
       trainer_id: authStore.user?.id,
       start_date: newPlan.value.start_date,
       end_date: newPlan.value.end_date,
+      // Send both for compatibility
       category: newPlan.value.category,
+      exercise_plan_category: newPlan.value.category,
+      user_level: newPlan.value.user_level,
       workout_name: workoutName,
       total_workouts: allExercises.length,
+      total_exercises: allExercises.length,
       training_minutes: totalTrainingMinutes,
       sets: totalSets,
       reps: totalReps,
       weight_kg: totalWeight,
       status: 'PLANNED',
-      exercises_details: JSON.stringify(allExercises) // Store exercises as JSON string
+      // New payload: items; keep exercises_details for backward compatibility
+      items: allExercises.map(ex => ({
+        workout_name: ex.name,
+        exercise_plan_category: newPlan.value.category,
+        exercise_types: ex.exercise_types,
+        user_level: newPlan.value.user_level,
+        sets: ex.sets,
+        reps: ex.reps,
+        weight_kg: ex.weight,
+        minutes: ex.training_minutes
+      })),
+      exercises_details: JSON.stringify(allExercises)
     }
     
     console.log('Sending plan data:', planData)
@@ -1359,12 +1537,32 @@ const updatePlan = async () => {
   }
 }
 
-const deleteTrainingPlan = async (planId) => {
-  if (confirm('Are you sure you want to delete this training plan?')) {
+const deleteTrainingPlan = async (planId, isFromAssignments = false) => {
+  const message = isFromAssignments 
+    ? 'Are you sure you want to unassign this training plan? It will remain in Training Plans but be unassigned.'
+    : 'Are you sure you want to delete this training plan? This will permanently remove it.';
+    
+  if (confirm(message)) {
     try {
-      await api.delete(`/trainingPlans/${planId}`)
-      trainingPlans.value = trainingPlans.value.filter(plan => plan.id !== planId)
-      myAssignments.value = myAssignments.value.filter(plan => plan.id !== planId)
+      const url = isFromAssignments 
+        ? `/trainingPlans/${planId}?unassign_only=true`
+        : `/trainingPlans/${planId}`;
+        
+      await api.delete(url)
+      
+      if (isFromAssignments) {
+        // Only remove from assignments, update the plan in training plans
+        myAssignments.value = myAssignments.value.filter(plan => plan.id !== planId)
+        // Update the plan in training plans to remove assign_to
+        const planIndex = trainingPlans.value.findIndex(plan => plan.id === planId)
+        if (planIndex !== -1) {
+          trainingPlans.value[planIndex].assign_to = null
+        }
+      } else {
+        // Full delete - remove from both lists
+        trainingPlans.value = trainingPlans.value.filter(plan => plan.id !== planId)
+        myAssignments.value = myAssignments.value.filter(plan => plan.id !== planId)
+      }
     } catch (error) {
       console.error('Error deleting plan:', error)
     }
@@ -1378,6 +1576,7 @@ const closeCreatePlanDialog = () => {
     end_date: '',
     workout_name: '',
     category: '',
+    user_level: 'Beginner',
     total_workouts: 0,
     training_minutes: 0,
     sets: 0,
@@ -1405,15 +1604,40 @@ const loadTrainingPlans = async () => {
 const loadMyAssignments = async () => {
   try {
     const response = await api.get('/trainingPlans/my-assignments')
-    myAssignments.value = response.data.data
+    // Enrich with user name/phone from store
+    const usersById = new Map(userManagementStore.users.map(u => [u.id, u]))
+    myAssignments.value = (response.data.data || []).map(p => ({
+      ...p,
+      user_name: usersById.get(p.user_id)?.name || '',
+      user_phone: usersById.get(p.user_id)?.phone || ''
+    }))
   } catch (error) {
     console.error('Error loading my assignments:', error)
+  }
+}
+
+const loadApprovals = async () => {
+  try {
+    const { data } = await api.get('/trainingApprovals?approval_status=PENDING')
+    approvals.value = data.data || []
+  } catch (e) {
+    console.error('Error loading approvals', e)
   }
 }
 
 const getTrainerName = (trainerId) => {
   const trainer = trainerOptions.value.find(t => t.value === trainerId)
   return trainer ? trainer.label : 'Unknown Trainer'
+}
+
+const getUserName = (userId) => {
+  const user = userManagementStore.users.find(u => u.id === userId)
+  return user?.name || 'Unknown User'
+}
+
+const getUserPhone = (userId) => {
+  const user = userManagementStore.users.find(u => u.id === userId)
+  return user?.phone || '-'
 }
 
 const getDefaultExercisesForCategory = (category) => {
@@ -1476,6 +1700,31 @@ onMounted(async () => {
   await userManagementStore.fetchUsers()
   await loadTrainingPlans()
   await loadMyAssignments()
+  await loadApprovals()
+
+  // Realtime updates for approvals
+  try {
+    const token = localStorage.getItem('token')
+    const socket = io('http://localhost:5000', {
+      path: '/socket.io',
+      auth: { token }
+    })
+    socket.on('connect_error', (err) => console.error('Socket error', err.message))
+    socket.on('trainingApproval:created', (row) => {
+      approvals.value = [row, ...approvals.value]
+    })
+    socket.on('trainingApproval:updated', (row) => {
+      approvals.value = approvals.value.map(a => a.id === row.id ? row : a)
+    })
+    socket.on('trainingApproval:deleted', ({ id }) => {
+      approvals.value = approvals.value.filter(a => a.id !== id)
+    })
+    socket.on('trainingApproval:status', (row) => {
+      approvals.value = approvals.value.filter(a => a.id !== row.id)
+    })
+  } catch (e) {
+    console.error('Failed to init socket', e)
+  }
 })
 </script>
 

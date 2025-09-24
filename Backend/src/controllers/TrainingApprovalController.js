@@ -37,10 +37,18 @@ exports.create = async (req, res, next) => {
         category: body.category,
         total_training_minutes: body.total_training_minutes ?? 0,
         total_workouts: body.total_workouts ?? 0,
+        minutes: body.minutes ?? 0,
+        exercise_types: (body.exercise_types !== undefined && body.exercise_types !== null && body.exercise_types !== '') ? body.exercise_types : null,
+        user_level: body.user_level ?? 'Beginner',
         approval_status: body.approval_status ?? 'PENDING',
         notes: body.notes ?? null,
       })
       .returning('*');
+    // Emit realtime event
+    try {
+      const io = req.app.get('io');
+      if (io) io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:created', row);
+    } catch (e) {}
     res.status(201).json({ success: true, data: row });
   } catch (err) { next(err); }
 };
@@ -66,6 +74,10 @@ exports.update = async (req, res, next) => {
       .update(update)
       .returning('*');
     if (!row) return res.status(404).json({ success: false, message: 'Approval not found' });
+    try {
+      const io = req.app.get('io');
+      if (io) io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:updated', row);
+    } catch (e) {}
     res.json({ success: true, data: row });
   } catch (err) { next(err); }
 };
@@ -76,6 +88,10 @@ exports.remove = async (req, res, next) => {
     const { id } = req.params;
     const deleted = await db('training_approvals').where({ id, gym_id: req.user.gym_id }).del();
     if (!deleted) return res.status(404).json({ success: false, message: 'Approval not found' });
+    try {
+      const io = req.app.get('io');
+      if (io) io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:deleted', { id });
+    } catch (e) {}
     res.json({ success: true, message: 'Approval deleted' });
   } catch (err) { next(err); }
 };
@@ -91,6 +107,10 @@ exports.updateStatus = async (req, res, next) => {
       .update({ approval_status })
       .returning('*');
     if (!row) return res.status(404).json({ success: false, message: 'Approval not found' });
+    try {
+      const io = req.app.get('io');
+      if (io) io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:status', row);
+    } catch (e) {}
     res.json({ success: true, data: row });
   } catch (err) { next(err); }
 };

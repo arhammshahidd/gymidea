@@ -16,5 +16,3 @@ router.patch('/:id/status', auth('gym_admin'), ctrl.updateStatus);
 router.post('/mobile/submit', auth('mobile_user'), ctrl.mobileSubmit);
 
 module.exports = router;
-
-

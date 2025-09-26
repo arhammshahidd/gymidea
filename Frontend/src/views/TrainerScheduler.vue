@@ -38,8 +38,8 @@
 
             <div class="other-details-section">
               <div class="detail-row">
-                <span><strong>Total Days:</strong> {{ calculateDuration(ap.start_date, ap.end_date) }}</span>
-                <span><strong>Total Exercises:</strong> {{ ap.total_workouts || 0 }}</span>
+                <span><strong>Plan Category:</strong> {{ ap.plan_category_name || ap.category || 'N/A' }}</span>
+                <span><strong>Total Days:</strong> {{ ap.total_days || calculateDuration(ap.start_date, ap.end_date) }}</span>
               </div>
             </div>
 
@@ -200,11 +200,20 @@
               class="category-select"
             />
 
+            <q-select
+              v-model="selectedUserLevel"
+              :options="assignmentUserLevelOptions"
+              label="Select User Level"
+              outlined
+              dense
+              class="category-select"
+            />
+
             <q-btn
               color="secondary"
               label="Assign Training"
               @click="assignTraining"
-              :disable="!selectedUser || !selectedCategory"
+              :disable="!selectedUser || !selectedCategory || !selectedUserLevel"
             />
           </div>
           </div>
@@ -228,7 +237,6 @@
           v-for="plan in allTrainingPlans"
           :key="plan.id"
           class="training-card"
-          :class="{ 'assignment-card': plan.assign_to }"
           flat
           bordered
         >
@@ -236,12 +244,7 @@
              <div class="card-header">
                <h4>{{ plan.category }} Plan</h4>
                <div class="card-actions">
-                 <q-badge
-                   v-if="plan.assign_to"
-                   color="info"
-                   label="Assigned"
-                   class="assignment-badge"
-                 />
+                
                  <q-btn
                    flat
                    round
@@ -300,7 +303,8 @@
                    <span><strong>End Date:</strong> {{ plan.end_date }}</span>
           </div>
                  <div class="detail-row">
-                   <span><strong>Total Training Minutes:</strong> {{ plan.training_minutes }} min</span>
+                  <span><strong>Total Training Minutes:</strong> {{ plan.training_minutes }} min</span>
+                  <span><strong>User Level:</strong> {{ plan.user_level }}</span>
         </div>
                  <div class="detail-row">
                    <span><strong>Total Sets:</strong> {{ plan.sets }}</span>
@@ -508,8 +512,8 @@
                 class="form-field"
               />
               <q-input
-                v-model="newPlan.total_workouts"
-                label="Total Workouts"
+                v-model.number="newPlan.exercise_types"
+                label="Exercise Type (number)"
                 type="number"
                 outlined
                 dense
@@ -558,7 +562,7 @@
               :key="index"
               class="exercise-item"
             >
-              <span>{{ exercise.name }} - {{ exercise.sets }} sets, {{ exercise.reps }} reps, {{ exercise.weight }}kg, {{ exercise.training_minutes }}min</span>
+              <span>{{ exercise.name }}<span v-if="exercise.exercise_types !== undefined && exercise.exercise_types !== null"> ({{ Array.isArray(exercise.exercise_types) ? exercise.exercise_types.join(', ') : exercise.exercise_types }})</span> - {{ exercise.sets }} sets, {{ exercise.reps }} reps, {{ exercise.weight }}kg, {{ exercise.training_minutes }}min</span>
               <q-btn
                 flat
                 round
@@ -639,6 +643,14 @@
                  dense
                  class="form-field"
                />
+              <q-select
+                v-model="editingPlan.user_level"
+                :options="userLevelOptions"
+                label="User Level"
+                outlined
+                dense
+                class="form-field"
+              />
                <q-select
                  v-model="editingPlan.assign_to"
                  :options="trainerOptions"
@@ -696,25 +708,32 @@
              </div>
            </div>
 
-           <!-- Existing Exercises List -->
-           <div class="exercises-list" v-if="editingPlan.exercises && editingPlan.exercises.length > 0">
-             <h4>Current Exercises</h4>
-             <div
-               v-for="(exercise, index) in editingPlan.exercises"
-               :key="index"
-               class="exercise-item"
-             >
-               <span>{{ exercise.name }} - {{ exercise.sets }} sets, {{ exercise.reps }} reps, {{ exercise.weight }}kg, {{ exercise.training_minutes }}min</span>
-               <q-btn
-                 flat
-                 round
-                 color="red"
-                 icon="delete"
-                 size="sm"
-                 @click="removeEditExercise(index)"
-               />
-             </div>
-           </div>
+          <!-- Existing Exercises List (Editable) -->
+          <div class="exercises-list" v-if="editingPlan.exercises && editingPlan.exercises.length > 0">
+            <h4>Current Exercises</h4>
+            <div
+              v-for="(exercise, index) in editingPlan.exercises"
+              :key="index"
+              class="exercise-item"
+            >
+              <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.5rem; width: 100%">
+                <q-input v-model="editingPlan.exercises[index].name" label="Name" dense outlined />
+                <q-input v-model.number="editingPlan.exercises[index].sets" type="number" label="Sets" dense outlined />
+                <q-input v-model.number="editingPlan.exercises[index].reps" type="number" label="Reps" dense outlined />
+                <q-input v-model.number="editingPlan.exercises[index].weight" type="number" label="Weight (kg)" dense outlined />
+                <q-input v-model.number="editingPlan.exercises[index].training_minutes" type="number" label="Minutes" dense outlined />
+                <q-input v-model.number="editingPlan.exercises[index].exercise_types" type="number" label="Type (num)" dense outlined />
+              </div>
+              <q-btn
+                flat
+                round
+                color="red"
+                icon="delete"
+                size="sm"
+                @click="removeEditExercise(index)"
+              />
+            </div>
+          </div>
 
            <q-btn
              color="secondary"
@@ -770,7 +789,8 @@
                      <p><strong>Category:</strong> {{ plan.category }}</p>
                      <p><strong>Duration:</strong> {{ calculateDuration(plan.start_date, plan.end_date) }} days</p>
                      <p><strong>Total Training Minutes:</strong> {{ plan.training_minutes }}</p>
-                     <p><strong>Total Sets:</strong> {{ plan.sets }} | <strong>Total Reps:</strong> {{ plan.reps }} | <strong>Total Weight:</strong> {{ plan.weight_kg }}kg</p>
+                    <p><strong>User Level:</strong> {{ plan.user_level }}</p>
+                    <p><strong>Total Sets:</strong> {{ plan.sets }} | <strong>Total Reps:</strong> {{ plan.reps }} | <strong>Total Weight:</strong> {{ plan.weight_kg }}kg</p>
                      <p><strong>Assigned To:</strong> {{ getTrainerName(plan.assign_to) }}</p>
                      <p><strong>Start Date:</strong> {{ plan.start_date }} | <strong>End Date:</strong> {{ plan.end_date }}</p>
                    </div>
@@ -788,6 +808,10 @@
                            <div class="exercise-name">{{ exercise.name }}</div>
                          </div>
                          <div class="workout-card-content">
+                          <div class="workout-detail-row" v-if="exercise.exercise_types !== undefined && exercise.exercise_types !== null">
+                            <span class="detail-label">Exercise Types:</span>
+                            <span class="detail-value">{{ Array.isArray(exercise.exercise_types) ? exercise.exercise_types.join(', ') : exercise.exercise_types }}</span>
+                          </div>
                            <div class="workout-detail-row">
                              <span class="detail-label">Total Workouts:</span>
                              <span class="detail-value">{{ exercise.total_workouts || 1 }}</span>
@@ -889,64 +913,146 @@
 
   <!-- Approval Details Dialog -->
   <q-dialog v-model="showApprovalDetails">
-    <q-card style="min-width: 900px; max-width: 1100px">
+    <q-card style="min-width: 1000px; max-width: 1200px">
       <q-card-section>
         <div class="text-h5" style="text-align:center">Training Approval Details</div>
-        <div class="text-caption" style="text-align:center">Review and approve the training plan</div>
+        <div class="text-caption" style="text-align:center">Review and approve the training plan for {{ approvalDetails?.user_name }}</div>
       </q-card-section>
 
       <q-card-section class="q-pt-none">
+        <!-- User Information Section -->
+        <div class="row q-mb-md">
+          <div class="col-12">
+            <q-card flat bordered class="q-pa-md">
+              <div class="text-h6 q-mb-md">User Information</div>
+              <div class="row q-gutter-md">
+                <div class="col-4">
+                  <div class="text-caption">User Name</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.user_name }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-caption">User ID</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.user_id }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-caption">Phone</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.user_phone }}</div>
+                </div>
+              </div>
+              <div class="row q-gutter-md q-mt-md">
+                <div class="col-4">
+                  <div class="text-caption">Total Days</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.total_days || calculateDuration(approvalDetails?.start_date, approvalDetails?.end_date) }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-caption">Plan Category</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.plan_category_name || approvalDetails?.category }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-caption">User Level</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.user_level }}</div>
+                </div>
+              </div>
+            </q-card>
+          </div>
+        </div>
+
+        <!-- Workout Plan Section -->
+        <div class="text-h6 q-mb-md">Workout Plan</div>
         <div class="training-cards-grid">
-          <q-card v-for="ex in (approvalDetails?.exercises_details ? JSON.parse(approvalDetails.exercises_details) : [])" :key="ex.name" flat bordered>
+          <q-card v-for="(ex, index) in (approvalDetails?.workout_plan || [])" :key="index" flat bordered class="exercise-card">
             <q-card-section>
-              <div class="text-subtitle1">{{ ex.name }}</div>
-              <div class="text-caption">Reps</div>
-              <div>{{ ex.reps }}</div>
-              <div class="text-caption q-mt-sm">Sets</div>
-              <div>{{ ex.sets }}</div>
-              <div class="text-caption q-mt-sm">Weight</div>
-              <div>{{ ex.weight }} <span v-if="ex.weight">kg</span></div>
-              <div class="text-caption q-mt-sm">Training Minutes</div>
-              <div>{{ ex.training_minutes }}</div>
+              <div class="text-subtitle1 q-mb-sm">{{ ex.name || ex.workout_name || `Exercise ${index + 1}` }}</div>
+              
+              <div class="row q-gutter-sm">
+                <div class="col-6">
+                  <div class="text-caption">Sets</div>
+                  <div class="text-body1">{{ ex.sets || 0 }}</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-caption">Reps</div>
+                  <div class="text-body1">{{ ex.reps || 0 }}</div>
+                </div>
+              </div>
+              
+              <div class="row q-gutter-sm q-mt-sm">
+                <div class="col-6">
+                  <div class="text-caption">Weight (kg)</div>
+                  <div class="text-body1">{{ ex.weight || ex.weight_kg || 0 }}</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-caption">Minutes</div>
+                  <div class="text-body1">{{ ex.training_minutes || ex.minutes || 0 }}</div>
+                </div>
+              </div>
+              
+              <div v-if="ex.exercise_types" class="q-mt-sm">
+                <div class="text-caption">Exercise Types</div>
+                <div class="text-body2">{{ Array.isArray(ex.exercise_types) ? ex.exercise_types.join(', ') : ex.exercise_types }}</div>
+              </div>
             </q-card-section>
           </q-card>
         </div>
 
+        <!-- Plan Summary -->
         <q-card flat bordered class="q-mt-md">
           <q-card-section>
             <div class="text-subtitle1">Plan Summary</div>
             <div class="row q-col-gutter-lg q-mt-md">
               <div class="col-12 col-md-3">
                 <div class="text-caption">Name</div>
-                <div>{{ approvalDetails?.user_name }}</div>
-              </div>
-              <div class="col-12 col-md-3">
-                <div class="text-caption">Contact Number</div>
-                <div>{{ approvalDetails?.user_phone }}</div>
+                <div class="text-body1">{{ approvalDetails?.user_name }}</div>
               </div>
               <div class="col-12 col-md-3">
                 <div class="text-caption">Exercise Plan Name</div>
-                <div>{{ approvalDetails?.category }}</div>
+                <div class="text-body1">{{ approvalDetails?.workout_name }}</div>
               </div>
               <div class="col-12 col-md-3">
-                <div class="text-caption">Total Exercises</div>
-                <div>{{ approvalDetails?.total_workouts || 0 }}</div>
+                <div class="text-caption">Total Training Minutes</div>
+                <div class="text-body1">{{ approvalDetails?.total_training_minutes || approvalDetails?.minutes || 0 }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Contact Number</div>
+                <div class="text-body1">{{ approvalDetails?.user_phone }}</div>
               </div>
             </div>
             <div class="row q-col-gutter-lg q-mt-md">
               <div class="col-12 col-md-3">
-                <div class="text-caption">Total Training Minutes</div>
-                <div>{{ approvalDetails?.total_training_minutes || 0 }}</div>
+                <div class="text-caption">Total Exercises</div>
+                <div class="text-body1">{{ approvalDetails?.total_exercises || approvalDetails?.total_workouts || 0 }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Total Days</div>
+                <div class="text-body1">{{ approvalDetails?.total_days || calculateDuration(approvalDetails?.start_date, approvalDetails?.end_date) }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Start Date</div>
+                <div class="text-body1">{{ formatDate(approvalDetails?.start_date) }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">End Date</div>
+                <div class="text-body1">{{ formatDate(approvalDetails?.end_date) }}</div>
               </div>
             </div>
           </q-card-section>
         </q-card>
-      </q-card-section>
 
-      <q-card-actions align="right">
-        <q-btn flat label="Reject" color="negative" @click="rejectRequest(approvalDetails.id)" />
-        <q-btn unelevated label="Approve" color="positive" @click="approveRequest(approvalDetails.id)" />
-      </q-card-actions>
+        <!-- Action Buttons -->
+        <div class="row justify-end q-mt-md q-gutter-sm">
+          <q-btn 
+            color="grey-6" 
+            label="Reject" 
+            icon="close"
+            @click="rejectRequest(approvalDetails?.id)"
+          />
+          <q-btn 
+            color="green" 
+            label="Approve" 
+            icon="check"
+            @click="approveRequest(approvalDetails?.id)"
+          />
+        </div>
+      </q-card-section>
     </q-card>
   </q-dialog>
 
@@ -974,7 +1080,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useUserManagementStore } from '../stores/userManagement'
 import { useAuthStore } from '../stores/auth'
 import api from '../config/axios'
@@ -988,6 +1094,7 @@ const authStore = useAuthStore()
 const userSearchQuery = ref('')
 const selectedUser = ref(null)
 const selectedCategory = ref(null)
+const selectedUserLevel = ref(null)
 const showCreatePlanDialog = ref(false)
 const showEditPlanDialog = ref(false)
 const showStatsDialog = ref(false)
@@ -1010,7 +1117,7 @@ const newPlan = ref({
   workout_name: '',
   category: '',
   user_level: 'Beginner',
-  total_workouts: 0,
+  exercise_types: null,
   training_minutes: 0,
   sets: 0,
   reps: 0,
@@ -1083,6 +1190,8 @@ const categoryOptions = [ 'Muscle Gain', 'Muscle Lose', 'Strength' ]
 // User level options
 const userLevelOptions = [ 'Beginner', 'Intermediate', 'Expert' ]
 
+// No dropdown options required for numeric single input
+
 // Trainer options (you can fetch this from an API or store)
 const trainerOptions = ref([
   { label: 'John Trainer', value: 1 },
@@ -1101,17 +1210,33 @@ const filteredUsers = computed(() => {
   )
 })
 
-const allTrainingPlans = computed(() => trainingPlans.value)
+// Show only unassigned plans (templates) in Training Plans to avoid duplicate clones
+const allTrainingPlans = computed(() => trainingPlans.value.filter(p => !p.user_id))
 
-// Only show categories that exist in unassigned, created plans (for assignment)
+// Show categories from unassigned plans; fallback to all plans if none unassigned
 const assignmentCategoryOptions = computed(() => {
-  const set = new Set(
-    trainingPlans.value
-      .filter(p => !p.assign_to)
-      .map(p => p.category)
-      .filter(Boolean)
-  )
-  return Array.from(set)
+  const unassigned = trainingPlans.value.filter(p => !p.assign_to)
+  const fromUnassigned = new Set(unassigned.map(p => p.category).filter(Boolean))
+  if (fromUnassigned.size > 0) return Array.from(fromUnassigned)
+  const fromAll = new Set(trainingPlans.value.map(p => p.category).filter(Boolean))
+  return Array.from(fromAll)
+})
+
+// Show user levels for selected category from unassigned; fallback to all plans in category; else default levels
+const assignmentUserLevelOptions = computed(() => {
+  if (!selectedCategory.value) return []
+  const byCategoryUnassigned = trainingPlans.value.filter(p => !p.assign_to && p.category === selectedCategory.value)
+  const fromUnassigned = new Set(byCategoryUnassigned.map(p => p.user_level).filter(Boolean))
+  if (fromUnassigned.size > 0) return Array.from(fromUnassigned)
+  const byCategoryAll = trainingPlans.value.filter(p => p.category === selectedCategory.value)
+  const fromAll = new Set(byCategoryAll.map(p => p.user_level).filter(Boolean))
+  if (fromAll.size > 0) return Array.from(fromAll)
+  return userLevelOptions
+})
+
+// Reset user level whenever category changes
+watch(selectedCategory, () => {
+  selectedUserLevel.value = null
 })
 
 const filteredApprovals = computed(() => {
@@ -1143,6 +1268,16 @@ const calculateDuration = (startDate, endDate) => {
   const end = new Date(endDate)
   const diffTime = Math.abs(end - start)
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+}
+
+const formatDate = (dateString) => {
+  if (!dateString) return 'N/A'
+  const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })
 }
 
 const getStatusColor = (status) => {
@@ -1249,7 +1384,7 @@ const approvalDetails = ref(null)
 
 const openApprovalDetails = async (id) => {
   try {
-    const { data } = await api.get(`/trainingApprovals/${id}`)
+    const { data } = await api.get(`/trainingApprovals/${id}/detailed`)
     approvalDetails.value = data.data
     showApprovalDetails.value = true
   } catch (e) {
@@ -1278,25 +1413,29 @@ const rejectRequest = async (id) => {
 }
 
 const assignTraining = async () => {
-  if (!selectedUser.value || !selectedCategory.value) return
+  if (!selectedUser.value || !selectedCategory.value || !selectedUserLevel.value) return
   try {
-    // Get the most recent unassigned plan for the chosen category
-    const candidatePlans = trainingPlans.value
-      .filter(p => p.category === selectedCategory.value && !p.assign_to)
+    // Prefer plans with no user yet for the selected category and user level
+    const matchingPlans = trainingPlans.value
+      .filter(p => p.category === selectedCategory.value && p.user_level === selectedUserLevel.value)
       .sort((a, b) => new Date(b.created_at || b.id) - new Date(a.created_at || a.id))
 
-    const planToAssign = candidatePlans[0]
+    let planToAssign = matchingPlans.find(p => !p.user_id)
+    if (!planToAssign) planToAssign = matchingPlans[0] // fallback; server will clone to new user
     if (!planToAssign) {
-      alert('No available plan found for the selected category. Please create a plan first.')
+      alert('No available plan found for the selected category and user level. Please create a plan first.')
       return
     }
 
-    // Update the existing plan: set user_id and assign_to; keep exercises/details intact
-    await api.put(`/trainingPlans/${planToAssign.id}`, {
+    // Assign via dedicated endpoint (works for trainers and gym admins)
+    const { data } = await api.patch(`/trainingPlans/${planToAssign.id}/assign`, {
       user_id: selectedUser.value,
-      assign_to: authStore.user?.id,
       status: planToAssign.status || 'PLANNED'
     })
+    // If created clone (201), notify; if 200 updated, also notify
+    if (data?.success) {
+      // noop; success handled below
+    }
 
     // Show success dialog
     const selectedUserData = userManagementStore.users.find(u => u.id === selectedUser.value)
@@ -1307,11 +1446,17 @@ const assignTraining = async () => {
     // Reset UI and refresh lists
     selectedUser.value = null
     selectedCategory.value = null
+    selectedUserLevel.value = null
     await loadTrainingPlans()
     await loadMyAssignments()
   } catch (error) {
     console.error('Error assigning training plan:', error)
-    alert('Failed to assign training plan: ' + (error.response?.data?.message || error.message))
+    const msg = error.response?.data?.message
+    if (msg && msg.includes('already assigned')) {
+      alert(msg)
+    } else {
+      alert('Failed to assign training plan: ' + (msg || error.message))
+    }
   }
 }
 
@@ -1323,16 +1468,16 @@ const addExercise = () => {
       reps: newPlan.value.reps,
       weight: newPlan.value.weight_kg,
       training_minutes: newPlan.value.training_minutes,
-      total_workouts: newPlan.value.total_workouts || 1
+      exercise_types: newPlan.value.exercise_types
     })
     
     // Reset only exercise-specific fields, keep date range and category
     newPlan.value.workout_name = ''
-    newPlan.value.total_workouts = 0
     newPlan.value.training_minutes = 0
     newPlan.value.sets = 0
     newPlan.value.reps = 0
     newPlan.value.weight_kg = 0
+    newPlan.value.exercise_types = null
   }
 }
 
@@ -1416,7 +1561,7 @@ const createPlan = async () => {
         reps: newPlan.value.reps,
         weight: newPlan.value.weight_kg,
         training_minutes: newPlan.value.training_minutes,
-        total_workouts: newPlan.value.total_workouts || 1
+        exercise_types: newPlan.value.exercise_types
       }]
     }
 
@@ -1471,22 +1616,50 @@ const createPlan = async () => {
   }
 }
 
-const editTrainingPlan = (plan) => {
-  // Parse existing exercises details if available
-  let existingExercises = []
-  if (plan.exercises_details) {
-    try {
-      existingExercises = JSON.parse(plan.exercises_details)
-    } catch (e) {
-      console.error('Error parsing exercises details:', e)
+const editTrainingPlan = async (plan) => {
+  try {
+    // Check if this is an assignment (from myAssignments) or a template plan
+    const isAssignment = plan.user_id && !plan.web_plan_id
+    const endpoint = isAssignment ? `/trainingPlans/assignments/${plan.id}` : `/trainingPlans/${plan.id}`
+    
+    // Fetch fresh data from server to ensure we have the latest
+    const response = await api.get(endpoint)
+    const freshPlan = response.data.data
+    
+    // Parse existing exercises details if available
+    let existingExercises = []
+    if (freshPlan.exercises_details) {
+      try {
+        existingExercises = JSON.parse(freshPlan.exercises_details)
+      } catch (e) {
+        console.error('Error parsing exercises details:', e)
+      }
     }
+    
+    editingPlan.value = { 
+      ...freshPlan,
+      exercises: existingExercises,
+      isAssignment: isAssignment
+    }
+    showEditPlanDialog.value = true
+  } catch (error) {
+    console.error('Error fetching plan for edit:', error)
+    // Fallback to local data if server fetch fails
+    let existingExercises = []
+    if (plan.exercises_details) {
+      try {
+        existingExercises = JSON.parse(plan.exercises_details)
+      } catch (e) {
+        console.error('Error parsing exercises details:', e)
+      }
+    }
+    
+    editingPlan.value = { 
+      ...plan,
+      exercises: existingExercises
+    }
+    showEditPlanDialog.value = true
   }
-  
-  editingPlan.value = { 
-    ...plan,
-    exercises: existingExercises
-  }
-  showEditPlanDialog.value = true
 }
 
 const updatePlan = async () => {
@@ -1494,6 +1667,16 @@ const updatePlan = async () => {
   try {
     // Prepare update data with exercises details
     const updateData = { ...editingPlan.value }
+    
+    // Remove frontend-only fields that don't exist in the database
+    delete updateData.user_name
+    delete updateData.user_phone
+    delete updateData.exercises // This is stored in exercises_details
+    
+    // Ensure assign_to is set to current trainer if not already assigned
+    if (!updateData.assign_to && updateData.user_id) {
+      updateData.assign_to = authStore.user?.id
+    }
     
     // If there are exercises, update the exercises_details field
     if (updateData.exercises && updateData.exercises.length > 0) {
@@ -1515,7 +1698,13 @@ const updatePlan = async () => {
     delete updateData.exercises
     
     console.log('Updating plan with data:', updateData)
-    const response = await api.put(`/trainingPlans/${editingPlan.value.id}`, updateData)
+    
+    // Use appropriate endpoint based on whether it's an assignment or template
+    const endpoint = editingPlan.value.isAssignment 
+      ? `/trainingPlans/assignments/${editingPlan.value.id}` 
+      : `/trainingPlans/${editingPlan.value.id}`
+    
+    const response = await api.put(endpoint, updateData)
     console.log('Plan updated successfully:', response.data)
     
     const index = trainingPlans.value.findIndex(plan => plan.id === editingPlan.value.id)
@@ -1527,6 +1716,10 @@ const updatePlan = async () => {
       myAssignments.value[assignmentIndex] = response.data.data
     }
     
+    // Ensure lists are in sync with server (refresh training plans and assignments)
+    await loadTrainingPlans()
+    await loadMyAssignments()
+
     closeEditPlanDialog()
     alert('Training plan updated successfully!')
   } catch (error) {
@@ -1539,29 +1732,21 @@ const updatePlan = async () => {
 
 const deleteTrainingPlan = async (planId, isFromAssignments = false) => {
   const message = isFromAssignments 
-    ? 'Are you sure you want to unassign this training plan? It will remain in Training Plans but be unassigned.'
+    ? 'Are you sure you want to delete this assignment? It will be removed from the user and mobile app.'
     : 'Are you sure you want to delete this training plan? This will permanently remove it.';
     
   if (confirm(message)) {
     try {
-      const url = isFromAssignments 
-        ? `/trainingPlans/${planId}?unassign_only=true`
-        : `/trainingPlans/${planId}`;
-        
-      await api.delete(url)
-      
       if (isFromAssignments) {
-        // Only remove from assignments, update the plan in training plans
+        // Delete assignment using the new assignment endpoint
+        await api.delete(`/trainingPlans/assignments/${planId}`)
+        // Remove from assignments list
         myAssignments.value = myAssignments.value.filter(plan => plan.id !== planId)
-        // Update the plan in training plans to remove assign_to
-        const planIndex = trainingPlans.value.findIndex(plan => plan.id === planId)
-        if (planIndex !== -1) {
-          trainingPlans.value[planIndex].assign_to = null
-        }
       } else {
-        // Full delete - remove from both lists
+        // Delete template plan
+        await api.delete(`/trainingPlans/${planId}`)
+        // Remove from training plans list
         trainingPlans.value = trainingPlans.value.filter(plan => plan.id !== planId)
-        myAssignments.value = myAssignments.value.filter(plan => plan.id !== planId)
       }
     } catch (error) {
       console.error('Error deleting plan:', error)
@@ -1577,7 +1762,7 @@ const closeCreatePlanDialog = () => {
     workout_name: '',
     category: '',
     user_level: 'Beginner',
-    total_workouts: 0,
+    exercise_types: null,
     training_minutes: 0,
     sets: 0,
     reps: 0,
@@ -1603,7 +1788,7 @@ const loadTrainingPlans = async () => {
 
 const loadMyAssignments = async () => {
   try {
-    const response = await api.get('/trainingPlans/my-assignments')
+    const response = await api.get('/trainingPlans/assignments/my')
     // Enrich with user name/phone from store
     const usersById = new Map(userManagementStore.users.map(u => [u.id, u]))
     myAssignments.value = (response.data.data || []).map(p => ({
@@ -2289,5 +2474,15 @@ onMounted(async () => {
     flex-direction: column;
     gap: 0.5rem;
   }
+}
+
+.exercise-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  transition: box-shadow 0.2s ease;
+}
+
+.exercise-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 </style>

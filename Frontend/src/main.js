@@ -20,7 +20,12 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 app.use(Quasar, {
-  plugins: {}, // import Quasar plugins and add here
+  plugins: {
+    // Add any Quasar plugins you need here
+  },
+  config: {
+    // Quasar config options
+  }
 })
 
 app.mount('#app')

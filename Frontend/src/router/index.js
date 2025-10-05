@@ -231,6 +231,11 @@ const router = createRouter({
           component: () => import('../views/TrainerScheduler.vue')
         },
         {
+          path: 'training-approval/:id',
+          name: 'GymAdminTrainingApprovalView',
+          component: () => import('../views/TrainingApprovalView.vue')
+        },
+        {
           path: 'food-menu',
           name: 'GymAdminFoodMenu',
           component: () => import('../views/FoodMenu.vue')
@@ -271,6 +276,11 @@ const router = createRouter({
           path: 'trainer-scheduler',
           name: 'TrainerScheduler',
           component: () => import('../views/TrainerScheduler.vue')
+        },
+        {
+          path: 'training-approval/:id',
+          name: 'TrainerTrainingApprovalView',
+          component: () => import('../views/TrainingApprovalView.vue')
         },
         {
           path: 'food-menu',

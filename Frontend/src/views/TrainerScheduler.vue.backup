@@ -1,0 +1,3244 @@
+<template>
+  <div class="trainer-scheduler-page">
+    <!-- Header Section -->
+    <q-card class="header-card q-mb-lg" elevated>
+      <q-card-section class="q-pa-lg">
+        <div class="header-content">
+          <div class="text-h4 text-weight-bold text-primary q-mb-xs">Trainer Scheduler</div>
+          <div class="text-subtitle1 text-grey-6">Manage training plans and user assignments</div>
+        </div>
+      </q-card-section>
+    </q-card>
+
+    <!-- Approval Training Section -->
+    <q-card class="approval-section-card q-mb-lg" elevated>
+      <q-card-section class="q-pa-lg">
+        <div class="row items-center justify-between q-mb-lg">
+          <div class="section-header">
+            <div class="text-h6 text-weight-bold text-primary q-mb-sm">Approval Training</div>
+            <div class="text-caption text-grey-6">Review and manage training approval requests</div>
+          </div>
+          <div class="search-container">
+            <q-input
+              v-model="approvalSearch"
+              placeholder="Search training by name"
+              outlined
+              clearable
+              class="search-input"
+            >
+              <template v-slot:prepend>
+                <q-icon name="search" color="primary" />
+              </template>
+            </q-input>
+          </div>
+        </div>
+
+        <div class="training-cards-grid">
+          <q-card
+            v-for="ap in filteredApprovals"
+            :key="ap.id"
+            class="training-card"
+            elevated
+          >
+            <q-card-section class="training-card-header">
+              <div class="row items-center justify-between">
+                <div class="plan-info">
+                  <div class="text-h6 text-weight-bold text-primary">{{ ap.workout_name }}</div>
+                  <div class="text-caption text-grey-6 q-mt-xs">
+                    <q-icon name="person" size="14px" class="q-mr-xs" />
+                    {{ ap.user_name }}
+                  </div>
+                </div>
+                <q-badge 
+                  :color="ap.approval_status === 'APPROVED' ? 'positive' : (ap.approval_status === 'REJECTED' ? 'negative' : 'warning')" 
+                  :label="ap.approval_status"
+                  class="status-badge"
+                >
+                  <q-icon 
+                    :name="ap.approval_status === 'APPROVED' ? 'check_circle' : (ap.approval_status === 'REJECTED' ? 'cancel' : 'schedule')"
+                    class="q-mr-xs"
+                  />
+                </q-badge>
+              </div>
+            </q-card-section>
+
+            <q-card-section class="training-card-content">
+              <div class="plan-details">
+                <div class="row q-col-gutter-sm">
+                  <div class="col-12 col-sm-6">
+                    <div class="detail-item">
+                      <q-icon name="category" color="primary" size="16px" class="q-mr-xs" />
+                      <span class="text-caption text-grey-6">Plan Category</span>
+                      <div class="text-body2 text-weight-medium">{{ ap.plan_category_name || ap.category || 'N/A' }}</div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-sm-6">
+                    <div class="detail-item">
+                      <q-icon name="schedule" color="primary" size="16px" class="q-mr-xs" />
+                      <span class="text-caption text-grey-6">Total Days</span>
+                      <div class="text-body2 text-weight-medium">{{ ap.total_days || calculateDuration(ap.start_date, ap.end_date) }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </q-card-section>
+
+            <q-card-actions class="training-card-actions">
+              <q-btn 
+                color="primary" 
+                label="View Details" 
+                icon="visibility"
+                @click="viewApprovalDetails(ap.id)" 
+                class="action-btn"
+                unelevated
+              />
+              <q-btn 
+                color="negative" 
+                icon="delete" 
+                flat 
+                @click="deleteTrainingApproval(ap.id)"
+                class="action-btn"
+              >
+                <q-tooltip>Delete Approval</q-tooltip>
+              </q-btn>
+            </q-card-actions>
+          </q-card>
+        </div>
+
+        <q-card v-if="filteredApprovals.length === 0" class="empty-state-card" elevated>
+          <q-card-section class="text-center q-pa-xl">
+            <q-icon name="assignment" size="64px" color="grey-5" class="q-mb-md" />
+            <div class="text-h6 text-grey-7 q-mb-sm">No pending approvals</div>
+            <div class="text-body2 text-grey-6">All training requests have been processed</div>
+          </q-card-section>
+        </q-card>
+      </q-card-section>
+    </q-card>
+    <!-- User List Table Section -->
+    <q-card class="user-list-card q-mb-lg" elevated>
+      <q-card-section class="q-pa-lg">
+        <div class="row items-center justify-between q-mb-lg">
+          <div class="section-header">
+            <div class="text-h6 text-weight-bold text-primary q-mb-sm">User List</div>
+            <div class="text-caption text-grey-6">Manage gym members and their information</div>
+          </div>
+          <div class="search-container">
+            <q-input
+              v-model="userSearchQuery"
+              placeholder="Search by name or phone..."
+              outlined
+              clearable
+              class="search-input"
+            >
+              <template v-slot:prepend>
+                <q-icon name="search" color="primary" />
+              </template>
+            </q-input>
+          </div>
+        </div>
+
+        <q-table
+          :rows="filteredUsers"
+          :columns="userColumns"
+          :loading="userManagementStore.loading"
+          row-key="id"
+          flat
+          bordered
+          class="user-table"
+          :rows-per-page-options="[5, 10, 20]"
+          loading-label="Loading users..."
+          no-data-label="No users found"
+          rows-per-page-label="Records per page:"
+        >
+        <template v-slot:body-cell-status="props">
+          <q-td :props="props">
+            <q-badge
+              :color="props.value === 'ACTIVE' ? 'green' : 'red'"
+              :label="props.value"
+            />
+          </q-td>
+        </template>
+
+        <template v-slot:body-cell-payment_status="props">
+          <q-td :props="props">
+            <q-badge
+              :color="props.value === 'Paid' ? 'green' : 'red'"
+              :label="props.value || 'Unpaid'"
+            />
+          </q-td>
+        </template>
+
+        <template v-slot:body-cell-actions="props">
+          <q-td :props="props">
+            <div class="action-buttons">
+              <q-btn
+                flat
+                round
+                color="primary"
+                icon="edit"
+                size="sm"
+                @click="editUserPlan(props.row)"
+                title="Edit Plan"
+              />
+              <q-btn
+                flat
+                round
+                color="secondary"
+                icon="add"
+                size="sm"
+                @click="createUserPlan(props.row)"
+                title="Create Plan"
+              />
+              <q-btn
+                flat
+                round
+                color="orange"
+                icon="visibility"
+                size="sm"
+                @click="viewUserTraining(props.row)"
+                title="View Training"
+              />
+              <q-btn
+                flat
+                round
+                color="info"
+                icon="analytics"
+                size="sm"
+                @click="viewUserStats(props.row)"
+                title="View Stats"
+              />
+            </div>
+          </q-td>
+        </template>
+        </q-table>
+      </q-card-section>
+    </q-card>
+          
+    <!-- Planned Trainings Section -->
+    <q-card class="planned-trainings-card q-mb-lg" elevated>
+      <q-card-section class="q-pa-lg">
+        <div class="row items-center justify-between q-mb-lg">
+          <div class="section-header">
+            <div class="text-h6 text-weight-bold text-primary q-mb-sm">Planned Trainings</div>
+            <div class="text-caption text-grey-6">Create and manage training plans for gym members</div>
+          </div>
+          <q-btn
+            color="primary"
+            icon="add"
+            label="Create New Plan"
+            @click="showCreatePlanDialog = true"
+            class="create-plan-btn"
+            unelevated
+            size="md"
+          />
+        </div>
+
+      <div class="assign-training-card">
+        <h3>Assign Training to User</h3>
+        <div class="assign-form">
+          <div class="form-row">
+              <q-select
+                v-model="selectedUser"
+                :options="userOptions"
+                option-label="label"
+                option-value="value"
+                emit-value
+                map-options
+                label="Search User by Name and Phone"
+                outlined
+                clearable
+                use-input
+                input-debounce="300"
+                @filter="filterUsers"
+                class="form-field"
+              >
+                <template v-slot:prepend>
+                  <q-icon name="person" color="primary" />
+                </template>
+                <template v-slot:no-option>
+                  <q-item>
+                    <q-item-section class="text-grey">
+                      No users found
+                    </q-item-section>
+                  </q-item>
+                </template>
+              </q-select>
+
+              <q-select
+                v-model="selectedCategory"
+                :options="assignmentCategoryOptions"
+                label="Select Training Plan Category"
+                outlined
+                clearable
+                emit-value
+                map-options
+                class="form-field"
+              >
+                <template v-slot:prepend>
+                  <q-icon name="category" color="primary" />
+                </template>
+              </q-select>
+
+              <q-select
+                v-model="selectedUserLevel"
+                :options="assignmentUserLevelOptions"
+                label="Select User Level"
+                outlined
+                clearable
+                emit-value
+                map-options
+                class="form-field"
+              >
+                <template v-slot:prepend>
+                  <q-icon name="fitness_center" color="primary" />
+                </template>
+              </q-select>
+
+              <q-btn
+                color="positive"
+                label="Assign Training"
+                icon="assignment"
+                @click="assignTraining"
+                :disable="!selectedUser || !selectedCategory || !selectedUserLevel"
+                class="assign-btn"
+                unelevated
+                size="md"
+              />
+            </div>
+          </q-card-section>
+        </q-card>
+      </q-card-section>
+    </q-card>
+
+    <!-- Training Plans Section -->
+    <q-card class="training-plans-card" elevated>
+      <q-card-section class="q-pa-lg">
+        <div class="row items-center justify-between q-mb-lg">
+          <div class="section-header">
+            <div class="text-h6 text-weight-bold text-primary q-mb-sm">Training Plans</div>
+            <div class="text-caption text-grey-6">View and manage existing training plans</div>
+          </div>
+          <q-btn
+            color="info"
+            icon="refresh"
+            label="Refresh"
+            @click="refreshAllPlans"
+            class="refresh-btn"
+            unelevated
+            size="md"
+          />
+        </div>
+
+        <div class="training-cards-grid">
+          <q-card
+            v-for="plan in allTrainingPlans"
+            :key="plan.id"
+            class="training-plan-card"
+            elevated
+          >
+            <q-card-section class="training-plan-header">
+              <div class="row items-center justify-between">
+                <div class="plan-info">
+                  <div class="text-h6 text-weight-bold text-primary">{{ plan.category }} Plan</div>
+                  <div class="text-caption text-grey-6 q-mt-xs">
+                    <q-icon name="fitness_center" size="14px" class="q-mr-xs" />
+                    Training Plan
+                  </div>
+                </div>
+                <div class="action-buttons">
+                  <q-btn
+                    flat
+                    round
+                    color="orange"
+                    icon="visibility"
+                    size="sm"
+                    @click="viewTrainingPlanDetails(plan)"
+                    class="action-btn"
+                  >
+                    <q-tooltip>View Workout Details</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    flat
+                    round
+                    color="primary"
+                    icon="edit"
+                    size="sm"
+                    @click="editTrainingPlan(plan)"
+                    class="action-btn"
+                  >
+                    <q-tooltip>Edit Plan</q-tooltip>
+                  </q-btn>
+                  <q-btn
+                    flat
+                    round
+                    color="negative"
+                    icon="delete"
+                    size="sm"
+                    @click="deleteTrainingPlan(plan.id)"
+                    class="action-btn"
+                  >
+                    <q-tooltip>Delete Plan</q-tooltip>
+                  </q-btn>
+                </div>
+              </div>
+            </q-card-section>
+
+            <q-card-section class="training-plan-content">
+              <div class="plan-details">
+                <div class="row q-col-gutter-sm">
+                  <div class="col-12 col-sm-6">
+                    <div class="detail-item">
+                      <q-icon name="schedule" color="primary" size="16px" class="q-mr-xs" />
+                      <span class="text-caption text-grey-6">Duration</span>
+                      <div class="text-body2 text-weight-medium">{{ calculateDuration(plan.start_date, plan.end_date) }} days</div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-sm-6">
+                    <div class="detail-item">
+                      <q-icon name="event" color="primary" size="16px" class="q-mr-xs" />
+                      <span class="text-caption text-grey-6">Start Date</span>
+                      <div class="text-body2 text-weight-medium">{{ formatDate(plan.start_date) }}</div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-sm-6">
+                    <div class="detail-item">
+                      <q-icon name="event" color="primary" size="16px" class="q-mr-xs" />
+                      <span class="text-caption text-grey-6">End Date</span>
+                      <div class="text-body2 text-weight-medium">{{ formatDate(plan.end_date) }}</div>
+                    </div>
+                  </div>
+                  <div class="col-12 col-sm-6">
+                    <div class="detail-item">
+                      <q-icon name="fitness_center" color="primary" size="16px" class="q-mr-xs" />
+                      <span class="text-caption text-grey-6">User Level</span>
+                      <div class="text-body2 text-weight-medium">{{ plan.user_level || 'N/A' }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </q-card-section>
+
+          </q-card>
+        </div>
+
+        <q-card v-if="allTrainingPlans.length === 0" class="empty-state-card" elevated>
+          <q-card-section class="text-center q-pa-xl">
+            <q-icon name="fitness_center" size="64px" color="grey-5" class="q-mb-md" />
+            <div class="text-h6 text-grey-7 q-mb-sm">No training plans created yet</div>
+            <div class="text-body2 text-grey-6">Create your first training plan to get started</div>
+          </q-card-section>
+        </q-card>
+      </q-card-section>
+    </q-card>
+
+     <!-- My Assignments Section -->
+     <div class="section">
+       <div class="section-header">
+         <h2>My Assignments</h2>
+         <q-btn
+           color="info"
+           icon="refresh"
+           label="Refresh"
+           @click="loadMyAssignments"
+         />
+       </div>
+
+       <div class="training-cards-grid">
+         <q-card
+           v-for="plan in myAssignments"
+           :key="plan.id"
+           class="training-card assignment-card"
+           flat
+           bordered
+         >
+           <q-card-section>
+             <div class="card-header">
+               <h4>{{ plan.category }} Plan</h4>
+               <div class="card-actions">
+                 <q-badge
+                   color="info"
+                   label="Assigned"
+                   class="assignment-badge"
+                 />
+                 <q-btn
+                   flat
+                   round
+                   color="orange"
+                   icon="visibility"
+                   size="sm"
+                   @click="viewTrainingPlanDetails(plan)"
+                   title="View Workout Details"
+                 />
+                 <q-btn
+                   flat
+                   round
+                   color="primary"
+                   icon="edit"
+                   size="sm"
+                   @click="editTrainingPlan(plan)"
+                   title="Edit Plan"
+                 />
+                 <q-btn
+                   flat
+                   round
+                   color="red"
+                   icon="delete"
+                   size="sm"
+                   @click="deleteTrainingPlan(plan.id, true)"
+                   title="Unassign Plan"
+                 />
+               </div>
+             </div>
+
+             <div class="card-content">
+
+               <!-- Duration Section -->
+               <div class="duration-section">
+                 <q-icon name="schedule" color="info" size="sm" />
+                 <span><strong>Duration:</strong> {{ calculateDuration(plan.start_date, plan.end_date) }} days</span>
+               </div>
+
+               <!-- Other Details Section -->
+               <div class="other-details-section">
+                 <div class="detail-row">
+                   <span><strong>User:</strong> {{ getUserName(plan.user_id) }}</span>
+                   <span><strong>Phone:</strong> {{ getUserPhone(plan.user_id) }}</span>
+                 </div>
+                 <div class="detail-row">
+                   <span><strong>Start Date:</strong> {{ plan.start_date }}</span>
+                   <span><strong>End Date:</strong> {{ plan.end_date }}</span>
+                 </div>
+                 <div class="detail-row">
+                   <span><strong>Total Sets:</strong> {{ plan.sets }}</span>
+                   <span><strong>Total Reps:</strong> {{ plan.reps }}</span>
+                 </div>
+                 <div class="detail-row">
+                   <span><strong>Assigned To:</strong> {{ getTrainerName(plan.assign_to) }}</span>
+                 </div>
+                 <div class="detail-row">
+                   <span><strong>Status:</strong> 
+                     <q-badge
+                       :color="getStatusColor(plan.status)"
+                       :label="plan.status"
+                     />
+                   </span>
+                 </div>
+               </div>
+             </div>
+           </q-card-section>
+         </q-card>
+       </div>
+
+       <div v-if="myAssignments.length === 0" class="no-plans">
+         <q-icon name="assignment" size="48px" color="grey-5" />
+         <p>No assignments yet</p>
+       </div>
+     </div>
+
+    <!-- Create New Plan Dialog -->
+    <q-dialog v-model="showCreatePlanDialog" persistent>
+      <q-card style="min-width: 600px; max-width: 800px">
+        <q-card-section>
+          <div class="text-h6">Create New Plan</div>
+        </q-card-section>
+
+        <q-card-section class="q-pt-none">
+          <div class="form-section">
+            <h4>Plan Duration</h4>
+            <div class="date-range">
+              <q-input
+                v-model="newPlan.start_date"
+                label="Start Date"
+                type="date"
+                outlined
+                dense
+                class="date-input"
+              />
+              <q-input
+                v-model="newPlan.end_date"
+                label="End Date"
+                type="date"
+                outlined
+                dense
+                class="date-input"
+              />
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h4>Exercise Details</h4>
+            <div class="exercise-form">
+              <q-input
+                v-model="newPlan.workout_name"
+                label="Workout Name"
+                outlined
+                dense
+                class="form-field"
+              />
+              <q-select
+                v-model="newPlan.category"
+                :options="categoryOptions"
+                label="Exercise Plan Category"
+                outlined
+                dense
+                class="form-field"
+              />
+              <q-select
+                v-model="newPlan.user_level"
+                :options="userLevelOptions"
+                label="User Level"
+                outlined
+                dense
+                class="form-field"
+              />
+              <q-input
+                v-model.number="newPlan.exercise_types"
+                label="Exercise Type (number)"
+                type="number"
+                outlined
+                dense
+                class="form-field"
+              />
+              <q-input
+                v-model="newPlan.training_minutes"
+                label="Training Minutes"
+                type="number"
+                outlined
+                dense
+                class="form-field"
+              />
+              <q-input
+                v-model="newPlan.sets"
+                label="Sets"
+                type="number"
+                outlined
+                dense
+                class="form-field"
+              />
+              <q-input
+                v-model="newPlan.reps"
+                label="Reps"
+                type="number"
+                outlined
+                dense
+                class="form-field"
+              />
+              <q-input
+                v-model="newPlan.weight_kg"
+                label="Weight (kg)"
+                type="number"
+                step="0.1"
+                outlined
+                dense
+                class="form-field"
+              />
+            </div>
+          </div>
+
+          <div class="exercises-list" v-if="newPlan.exercises && newPlan.exercises.length > 0">
+            <h4>Added Exercises</h4>
+            <div
+              v-for="(exercise, index) in newPlan.exercises"
+              :key="index"
+              class="exercise-item"
+            >
+              <span>{{ exercise.name }}<span v-if="exercise.exercise_types !== undefined && exercise.exercise_types !== null"> ({{ Array.isArray(exercise.exercise_types) ? exercise.exercise_types.join(', ') : exercise.exercise_types }})</span> - {{ exercise.sets }} sets, {{ exercise.reps }} reps, {{ exercise.weight_kg || exercise.weight || 0 }}kg, {{ exercise.training_minutes }}min</span>
+              <q-btn
+                flat
+                round
+                color="red"
+                icon="delete"
+                size="sm"
+                @click="removeExercise(index)"
+              />
+            </div>
+          </div>
+
+          <q-btn
+            color="secondary"
+            icon="add"
+            label="Add More Exercises"
+            @click="addExercise"
+            class="add-exercise-btn"
+          />
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Cancel" @click="closeCreatePlanDialog" />
+          <q-btn
+            color="primary"
+            label="Create Plan"
+            @click="createPlan"
+            :loading="creatingPlan"
+          />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+     <!-- Edit Training Plan Dialog -->
+     <q-dialog v-model="showEditPlanDialog" persistent>
+       <q-card style="min-width: 600px; max-width: 800px">
+         <q-card-section>
+           <div class="text-h6">Edit Training Plan</div>
+         </q-card-section>
+
+         <q-card-section class="q-pt-none">
+           <div class="form-section">
+             <h4>Plan Duration</h4>
+             <div class="date-range">
+               <q-input
+                 v-model="editingPlan.start_date"
+                 label="Start Date"
+                 type="date"
+                 outlined
+                 dense
+                 class="date-input"
+               />
+               <q-input
+                 v-model="editingPlan.end_date"
+                 label="End Date"
+                 type="date"
+                 outlined
+                 dense
+                 class="date-input"
+               />
+             </div>
+           </div>
+
+           <div class="form-section">
+               <h4>Plan Details</h4>
+             <div class="exercise-form">
+               <q-input
+                 v-model="editingPlan.workout_name"
+                 label="Workout Name"
+                 outlined
+                 dense
+                 class="form-field"
+               />
+               <q-select
+                 v-model="editingPlan.category"
+                 :options="categoryOptions"
+                   label="Plan Category Name"
+                 outlined
+                 dense
+                 class="form-field"
+               />
+              <q-select
+                v-model="editingPlan.user_level"
+                :options="userLevelOptions"
+                label="User Level"
+                outlined
+                dense
+                class="form-field"
+              />
+             </div>
+           </div>
+
+          <!-- Individual Exercises List (Editable) -->
+          <div class="exercises-list" v-if="editingPlan.exercises && editingPlan.exercises.length > 0">
+            <h4>Individual Exercises</h4>
+            <div style="background: #e3f2fd; padding: 10px; margin: 10px 0; border-radius: 4px; font-size: 12px;">
+              🔍 DEBUG: Found {{ editingPlan.exercises.length }} exercises to edit
+            </div>
+            <div
+              v-for="(exercise, index) in editingPlan.exercises"
+              :key="index"
+              class="exercise-item"
+            >
+              <div class="exercise-header">
+                <h5>Exercise {{ index + 1 }}</h5>
+                <q-btn
+                  flat
+                  round
+                  color="red"
+                  icon="delete"
+                  size="sm"
+                  @click="removeEditExercise(index)"
+                  title="Delete Exercise"
+                />
+              </div>
+              <div class="exercise-form">
+                <q-input 
+                  v-model="editingPlan.exercises[index].name" 
+                  label="Workout Name" 
+                 outlined
+                 dense
+                 class="form-field"
+               />
+               <q-input
+                  v-model.number="editingPlan.exercises[index].sets" 
+                 type="number"
+                  label="Sets" 
+                 outlined
+                 dense
+                 class="form-field"
+               />
+               <q-input
+                  v-model.number="editingPlan.exercises[index].reps" 
+                 type="number"
+                  label="Reps" 
+                 outlined
+                 dense
+                 class="form-field"
+               />
+               <q-input
+                  v-model.number="editingPlan.exercises[index].weight_kg" 
+                 type="number"
+                  step="0.1"
+                  label="Weight (kg)" 
+                 outlined
+                 dense
+                 class="form-field"
+               />
+               <q-input
+                  v-model.number="editingPlan.exercises[index].training_minutes" 
+                 type="number"
+                  label="Minutes" 
+                 outlined
+                 dense
+                 class="form-field"
+               />
+               <q-input
+                  v-model="editingPlan.exercises[index].exercise_types" 
+                  label="Exercise Types" 
+                 outlined
+                 dense
+                 class="form-field"
+               />
+              </div>
+             </div>
+           </div>
+
+          <!-- No exercises message -->
+          <div v-else class="no-exercises-message">
+            <p>No exercises found. Add exercises to this plan.</p>
+            <div style="background: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 4px; font-size: 12px;">
+              🔍 DEBUG: exercises={{ editingPlan.exercises ? editingPlan.exercises.length : 'null' }}, exercises_details={{ editingPlan.exercises_details ? 'exists' : 'null' }}
+            </div>
+          </div>
+
+           <q-btn
+             color="secondary"
+             icon="add"
+             label="Add More Exercises"
+             @click="addEditExercise"
+             class="add-exercise-btn"
+           />
+         </q-card-section>
+
+         <q-card-actions align="right">
+           <q-btn flat label="Cancel" @click="closeEditPlanDialog" />
+           <q-btn
+             color="primary"
+             label="Update Plan"
+             @click="updatePlan"
+             :loading="updatingPlan"
+           />
+         </q-card-actions>
+       </q-card>
+     </q-dialog>
+
+    <!-- View Stats/Training Dialog -->
+    <q-dialog v-model="showStatsDialog">
+      <q-card style="min-width: 600px; max-width: 800px">
+        <q-card-section>
+          <div class="text-h6">
+            {{ userStats?.trainingPlans?.length === 1 ? 'Training Plan Details' : (userStats?.trainingPlans ? 'Training Plans' : 'User Statistics') }} - {{ selectedUserForStats?.name }}
+          </div>
+        </q-card-section>
+
+        <q-card-section class="q-pt-none">
+          <div v-if="userStats" class="stats-content">
+             <!-- Training Plans Section (when viewing training) -->
+             <div v-if="userStats.trainingPlans" class="stats-section">
+               <h4>Training Plan Details</h4>
+               <div v-if="userStats.trainingPlans.length > 0">
+                 <div
+                   v-for="plan in userStats.trainingPlans"
+                   :key="plan.id"
+                   class="training-plan-item"
+                 >
+                   <div class="plan-header">
+                     <h5>{{ plan.workout_name }}</h5>
+                     <q-badge
+                       :color="getStatusColor(plan.status)"
+                       :label="plan.status"
+                     />
+                   </div>
+                   
+                   <!-- Plan Overview -->
+                   <div class="plan-overview">
+                     <p><strong>Category:</strong> {{ plan.category }}</p>
+                     <p><strong>Duration:</strong> {{ calculateDuration(plan.start_date, plan.end_date) }} days</p>
+                    <p><strong>User Level:</strong> {{ plan.user_level }}</p>
+                     <p><strong>Assigned To:</strong> {{ getTrainerName(plan.assign_to) }}</p>
+                     <p><strong>Start Date:</strong> {{ plan.start_date }} | <strong>End Date:</strong> {{ plan.end_date }}</p>
+                   </div>
+
+                   <!-- Daily Plans Section (New) -->
+                   <div v-if="plan.dailyPlans && plan.dailyPlans.length > 0" class="daily-plans-section">
+                     <h6>Daily Workout Distribution:</h6>
+                     <div class="daily-plans-grid">
+                       <div
+                         v-for="dayPlan in plan.dailyPlans"
+                         :key="dayPlan.day"
+                         class="day-plan-card"
+                       >
+                         <div class="day-header">
+                           <strong>Day {{ dayPlan.day }}</strong>
+                           <span class="day-date">{{ formatDate(dayPlan.date) }}</span>
+                         </div>
+                         <div class="day-workouts">
+                           <div
+                             v-for="(workout, index) in dayPlan.workouts"
+                             :key="index"
+                             class="workout-item"
+                           >
+                             <div class="workout-name">{{ workout.workout_name }}</div>
+                             <div class="workout-details">
+                               {{ workout.sets }}x{{ workout.reps }} @ {{ workout.weight_kg }}kg ({{ workout.minutes }}min)
+                             </div>
+                           </div>
+                         </div>
+                         <div class="day-summary">
+                           <span>{{ dayPlan.total_workouts }} workouts, {{ dayPlan.total_minutes }}min</span>
+                         </div>
+                       </div>
+                     </div>
+                   </div>
+
+                   <!-- Individual Workout Cards (Fallback for old plans) -->
+                   <div v-else-if="plan.exercisesDetails && plan.exercisesDetails.length > 0" class="workout-cards-section">
+                     <h6>Individual Workout Details:</h6>
+                     <div class="workout-cards-grid">
+                       <div
+                         v-for="(exercise, index) in plan.exercisesDetails"
+                         :key="index"
+                         class="workout-detail-card"
+                       >
+                         <div class="workout-card-header">
+                           <div class="exercise-name">{{ exercise.name }}</div>
+                         </div>
+                         <div class="workout-card-content">
+                          <div class="workout-detail-row" v-if="exercise.exercise_types !== undefined && exercise.exercise_types !== null">
+                            <span class="detail-label">Exercise Types:</span>
+                            <span class="detail-value">{{ Array.isArray(exercise.exercise_types) ? exercise.exercise_types.join(', ') : exercise.exercise_types }}</span>
+                          </div>
+                           <div class="workout-detail-row">
+                             <span class="detail-label">Total Workouts:</span>
+                             <span class="detail-value">{{ exercise.total_workouts || 1 }}</span>
+                           </div>
+                           <div class="workout-detail-row">
+                             <span class="detail-label">Sets:</span>
+                             <span class="detail-value">{{ exercise.sets }}</span>
+                           </div>
+                           <div class="workout-detail-row">
+                             <span class="detail-label">Reps:</span>
+                             <span class="detail-value">{{ exercise.reps }}</span>
+                           </div>
+                           <div class="workout-detail-row">
+                             <span class="detail-label">Weight:</span>
+                             <span class="detail-value">{{ exercise.weight_kg || exercise.weight || 0 }}</span>
+                           </div>
+                           <div class="workout-detail-row">
+                             <span class="detail-label">Training Minutes:</span>
+                             <span class="detail-value">{{ exercise.training_minutes }}</span>
+                           </div>
+                         </div>
+                       </div>
+                     </div>
+                   </div>
+                   
+                   <!-- Fallback message if no exercises details -->
+                   <div v-else class="no-exercises-message">
+                     <p>No individual workout details available. This plan contains: {{ plan.workout_name }}</p>
+                   </div>
+                   
+                   <div class="plan-actions">
+                     <q-btn
+                       flat
+                       round
+                       color="primary"
+                       icon="edit"
+                       size="sm"
+                       @click="editTrainingPlan(plan); showStatsDialog = false"
+                       title="Edit Plan"
+                     />
+                     <q-btn
+                       flat
+                       round
+                       color="red"
+                       icon="delete"
+                       size="sm"
+                       @click="deleteTrainingPlan(plan.id); showStatsDialog = false"
+                       title="Delete Plan"
+                     />
+                   </div>
+                 </div>
+               </div>
+               <p v-else class="text-grey">No training plans found for this user</p>
+             </div>
+
+            <!-- Stats Section (when viewing stats) -->
+            <div v-if="!userStats.trainingPlans">
+              <div class="stats-section">
+                <h4>Ongoing Workouts</h4>
+                <div v-if="userStats.ongoing.length > 0">
+                  <div
+                    v-for="workout in userStats.ongoing"
+                    :key="workout.id"
+                    class="workout-item"
+                  >
+                    <p><strong>{{ workout.workout_name }}</strong> - {{ workout.category }}</p>
+                    <p>Status: {{ workout.status }}</p>
+                    <p>Duration: {{ workout.start_date }} to {{ workout.end_date }}</p>
+                  </div>
+                </div>
+                <p v-else class="text-grey">No ongoing workouts</p>
+              </div>
+
+              <div class="stats-section">
+                <h4>Completed Workouts</h4>
+                <div v-if="userStats.completed.length > 0">
+                  <div
+                    v-for="workout in userStats.completed"
+                    :key="workout.id"
+                    class="workout-item"
+                  >
+                    <p><strong>{{ workout.workout_name }}</strong> - {{ workout.category }}</p>
+                    <p>Date: {{ workout.date }}</p>
+                    <p>Duration: {{ workout.duration_minutes }} minutes</p>
+                    <p>Results: {{ workout.results.sets }} sets, {{ workout.results.reps }} reps, {{ workout.results.weight_kg }}kg</p>
+                  </div>
+                </div>
+                <p v-else class="text-grey">No completed workouts</p>
+              </div>
+            </div>
+          </div>
+        </q-card-section>
+
+        <q-card-actions align="right">
+          <q-btn flat label="Close" @click="showStatsDialog = false" />
+        </q-card-actions>
+      </q-card>
+     </q-dialog>
+
+  <!-- Approval Details Dialog -->
+  <q-dialog v-model="showApprovalDetails">
+    <q-card style="min-width: 1000px; max-width: 1200px">
+      <q-card-section>
+        <div class="text-h5" style="text-align:center">Training Approval Details</div>
+        <div class="text-caption" style="text-align:center">Review and approve the training plan for {{ approvalDetails?.user_name }}</div>
+      </q-card-section>
+
+      <q-card-section class="q-pt-none">
+        <!-- User Information Section -->
+        <div class="row q-mb-md">
+          <div class="col-12">
+            <q-card flat bordered class="q-pa-md">
+              <div class="text-h6 q-mb-md">User Information</div>
+              <div class="row q-gutter-md">
+                <div class="col-4">
+                  <div class="text-caption">User Name</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.user_name }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-caption">User ID</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.user_id }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-caption">Phone</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.user_phone }}</div>
+                </div>
+              </div>
+              <div class="row q-gutter-md q-mt-md">
+                <div class="col-4">
+                  <div class="text-caption">Total Days</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.total_days || calculateDuration(approvalDetails?.start_date, approvalDetails?.end_date) }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-caption">Plan Category</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.plan_category_name || approvalDetails?.category }}</div>
+                </div>
+                <div class="col-4">
+                  <div class="text-caption">User Level</div>
+                  <div class="text-subtitle1">{{ approvalDetails?.user_level }}</div>
+                </div>
+              </div>
+            </q-card>
+          </div>
+        </div>
+
+        <!-- Workout Plan Section -->
+        <div class="text-h6 q-mb-md">Workout Plan</div>
+        <div class="training-cards-grid">
+          <q-card v-for="(ex, index) in (approvalDetails?.workout_plan || [])" :key="index" flat bordered class="exercise-card">
+            <q-card-section>
+              <div class="text-subtitle1 q-mb-sm">{{ ex.name || ex.workout_name || `Exercise ${index + 1}` }}</div>
+              
+              <div class="row q-gutter-sm">
+                <div class="col-6">
+                  <div class="text-caption">Sets</div>
+                  <div class="text-body1">{{ ex.sets || 0 }}</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-caption">Reps</div>
+                  <div class="text-body1">{{ ex.reps || 0 }}</div>
+                </div>
+              </div>
+              
+              <div class="row q-gutter-sm q-mt-sm">
+                <div class="col-6">
+                  <div class="text-caption">Weight (kg)</div>
+                  <div class="text-body1">{{ ex.weight || ex.weight_kg || 0 }}</div>
+                </div>
+                <div class="col-6">
+                  <div class="text-caption">Minutes</div>
+                  <div class="text-body1">{{ ex.training_minutes || ex.minutes || 0 }}</div>
+                </div>
+              </div>
+              
+              <div v-if="ex.exercise_types" class="q-mt-sm">
+                <div class="text-caption">Exercise Types</div>
+                <div class="text-body2">{{ Array.isArray(ex.exercise_types) ? ex.exercise_types.join(', ') : ex.exercise_types }}</div>
+              </div>
+            </q-card-section>
+          </q-card>
+        </div>
+
+        <!-- Plan Summary -->
+        <q-card flat bordered class="q-mt-md">
+          <q-card-section>
+            <div class="text-subtitle1">Plan Summary</div>
+            <div class="row q-col-gutter-lg q-mt-md">
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Name</div>
+                <div class="text-body1">{{ approvalDetails?.user_name }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Exercise Plan Name</div>
+                <div class="text-body1">{{ approvalDetails?.workout_name }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Total Training Minutes</div>
+                <div class="text-body1">{{ approvalDetails?.total_training_minutes || approvalDetails?.minutes || 0 }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Contact Number</div>
+                <div class="text-body1">{{ approvalDetails?.user_phone }}</div>
+              </div>
+            </div>
+            <div class="row q-col-gutter-lg q-mt-md">
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Total Exercises</div>
+                <div class="text-body1">{{ approvalDetails?.total_exercises || approvalDetails?.total_workouts || 0 }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Total Days</div>
+                <div class="text-body1">{{ approvalDetails?.total_days || calculateDuration(approvalDetails?.start_date, approvalDetails?.end_date) }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">Start Date</div>
+                <div class="text-body1">{{ formatDate(approvalDetails?.start_date) }}</div>
+              </div>
+              <div class="col-12 col-md-3">
+                <div class="text-caption">End Date</div>
+                <div class="text-body1">{{ formatDate(approvalDetails?.end_date) }}</div>
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
+
+        <!-- Action Buttons -->
+        <div class="row justify-end q-mt-md q-gutter-sm">
+          <q-btn 
+            color="grey-6" 
+            label="Reject" 
+            icon="close"
+            @click="rejectRequest(approvalDetails?.id)"
+          />
+          <q-btn 
+            color="green" 
+            label="Approve" 
+            icon="check"
+            @click="approveRequest(approvalDetails?.id)"
+          />
+        </div>
+      </q-card-section>
+    </q-card>
+  </q-dialog>
+
+     <!-- Training Plan Assignment Success Dialog -->
+     <q-dialog v-model="showAssignmentDialog" persistent>
+       <q-card style="min-width: 400px; max-width: 500px">
+         <q-card-section class="text-center">
+           <div class="assignment-success">
+             <q-icon name="check_circle" color="green" size="64px" />
+             <h4 class="success-title">Training Plan Assigned Successfully!</h4>
+             <p class="user-name">Assigned to: <strong>{{ assignedUserName }}</strong></p>
+             <div class="loading-bar">
+               <q-linear-progress 
+                 color="green" 
+                 :value="1" 
+                 animation-speed="2000"
+                 class="progress-bar"
+               />
+             </div>
+           </div>
+         </q-card-section>
+       </q-card>
+     </q-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserManagementStore } from '../stores/userManagement'
+import { useAuthStore } from '../stores/auth'
+import api from '../config/axios'
+import { io } from 'socket.io-client'
+
+// Router
+const router = useRouter()
+
+// Stores
+const userManagementStore = useUserManagementStore()
+const authStore = useAuthStore()
+
+// Reactive data
+const userSearchQuery = ref('')
+const selectedUser = ref(null)
+const selectedCategory = ref(null)
+const selectedUserLevel = ref(null)
+const showCreatePlanDialog = ref(false)
+const showEditPlanDialog = ref(false)
+const showStatsDialog = ref(false)
+const showAssignmentDialog = ref(false)
+const assignedUserName = ref('')
+const creatingPlan = ref(false)
+const updatingPlan = ref(false)
+const trainingPlans = ref([])
+const myAssignments = ref([])
+const approvals = ref([])
+const approvalSearch = ref('')
+const userStats = ref(null)
+const selectedUserForStats = ref(null)
+const editingPlan = ref({})
+
+// New plan form
+const newPlan = ref({
+  start_date: '',
+  end_date: '',
+  workout_name: '',
+  category: '',
+  user_level: 'Beginner',
+  exercise_types: null,
+  training_minutes: 0,
+  sets: 0,
+  reps: 0,
+  weight_kg: 0,
+  exercises: []
+})
+
+// Table columns
+const userColumns = [
+  {
+    name: 'id',
+    required: true,
+    label: 'User ID',
+    align: 'left',
+    field: 'id',
+    sortable: true
+  },
+  {
+    name: 'name',
+    required: true,
+    label: 'Name',
+    align: 'left',
+    field: 'name',
+    sortable: true
+  },
+  {
+    name: 'email',
+    required: true,
+    label: 'Email',
+    align: 'left',
+    field: 'email',
+    sortable: true
+  },
+  {
+    name: 'phone',
+    required: true,
+    label: 'Phone',
+    align: 'left',
+    field: 'phone',
+    sortable: true
+  },
+  {
+    name: 'status',
+    required: true,
+    label: 'Status',
+    align: 'left',
+    field: 'status',
+    sortable: true
+  },
+  {
+    name: 'payment_status',
+    required: true,
+    label: 'Payment Status',
+    align: 'left',
+    field: 'payment_status',
+    sortable: true
+  },
+  {
+    name: 'actions',
+    required: true,
+    label: 'Actions',
+    align: 'center',
+    field: 'actions'
+  }
+]
+
+// Category options used for the Create Plan form
+const categoryOptions = [ 'Muscle Gain', 'Muscle Lose', 'Strength' ]
+
+// User level options
+const userLevelOptions = [ 'Beginner', 'Intermediate', 'Expert' ]
+
+// No dropdown options required for numeric single input
+
+// Trainer options (you can fetch this from an API or store)
+const trainerOptions = ref([
+  { label: 'John Trainer', value: 1 },
+  { label: 'Mike Trainer', value: 2 },
+  { label: 'Sarah Trainer', value: 3 }
+])
+
+// Computed properties
+const filteredUsers = computed(() => {
+  if (!userSearchQuery.value) return userManagementStore.users
+  const query = userSearchQuery.value.toLowerCase()
+  return userManagementStore.users.filter(user => 
+    user.name?.toLowerCase().includes(query) ||
+    user.phone?.toLowerCase().includes(query) ||
+    user.email?.toLowerCase().includes(query)
+  )
+})
+
+// Show only unassigned plans (templates) in Training Plans to avoid duplicate clones
+const allTrainingPlans = computed(() => trainingPlans.value.filter(p => !p.user_id))
+
+// Show categories from unassigned plans; fallback to all plans if none unassigned
+const assignmentCategoryOptions = computed(() => {
+  const unassigned = trainingPlans.value.filter(p => !p.assign_to)
+  const fromUnassigned = new Set(unassigned.map(p => p.category).filter(Boolean))
+  if (fromUnassigned.size > 0) return Array.from(fromUnassigned)
+  const fromAll = new Set(trainingPlans.value.map(p => p.category).filter(Boolean))
+  return Array.from(fromAll)
+})
+
+// Show user levels for selected category from unassigned; fallback to all plans in category; else default levels
+const assignmentUserLevelOptions = computed(() => {
+  if (!selectedCategory.value) return []
+  const byCategoryUnassigned = trainingPlans.value.filter(p => !p.assign_to && p.category === selectedCategory.value)
+  const fromUnassigned = new Set(byCategoryUnassigned.map(p => p.user_level).filter(Boolean))
+  if (fromUnassigned.size > 0) return Array.from(fromUnassigned)
+  const byCategoryAll = trainingPlans.value.filter(p => p.category === selectedCategory.value)
+  const fromAll = new Set(byCategoryAll.map(p => p.user_level).filter(Boolean))
+  if (fromAll.size > 0) return Array.from(fromAll)
+  return userLevelOptions
+})
+
+// Reset user level whenever category changes
+watch(selectedCategory, () => {
+  selectedUserLevel.value = null
+})
+
+const filteredApprovals = computed(() => {
+  if (!approvalSearch.value) return approvals.value
+  const q = approvalSearch.value.toLowerCase()
+  return approvals.value.filter(a =>
+    a.workout_name?.toLowerCase().includes(q) ||
+    a.user_name?.toLowerCase().includes(q)
+  )
+})
+
+const userOptions = computed(() => {
+  return userManagementStore.users.map(user => ({
+    label: `${user.name} (${user.phone})`,
+    value: user.id
+  }))
+})
+
+// Methods
+const filterUsers = (val, update) => {
+  update(() => {
+    // Filter logic is handled by computed property
+  })
+}
+
+const calculateDuration = (startDate, endDate) => {
+  if (!startDate || !endDate) return 0
+  const start = new Date(startDate)
+  const end = new Date(endDate)
+  const diffTime = Math.abs(end - start)
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+}
+
+const formatDate = (dateString) => {
+  if (!dateString) return 'N/A'
+  const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })
+}
+
+const getStatusColor = (status) => {
+  switch (status) {
+    case 'ACTIVE': return 'green'
+    case 'PLANNED': return 'orange'
+    case 'COMPLETED': return 'blue'
+    case 'CANCELLED': return 'red'
+    default: return 'grey'
+  }
+}
+
+const editUserPlan = (user) => {
+  // Find existing plan for user
+  const userPlan = trainingPlans.value.find(plan => plan.user_id === user.id)
+  if (userPlan) {
+    editTrainingPlan(userPlan)
+  } else {
+    // If no plan exists, create a new one
+    selectedUser.value = user.id
+    showCreatePlanDialog.value = true
+  }
+}
+
+const createUserPlan = (user) => {
+  selectedUser.value = user.id
+  showCreatePlanDialog.value = true
+}
+
+const viewUserStats = async (user) => {
+  selectedUserForStats.value = user
+  try {
+    const response = await api.get(`/stats/view?user_id=${user.id}`)
+    const statsData = response.data.data
+    
+    // Process training plans to include daily plans
+    if (statsData.trainingPlans && Array.isArray(statsData.trainingPlans)) {
+      statsData.trainingPlans = statsData.trainingPlans.map(plan => {
+        let dailyPlans = []
+        let exercisesDetails = []
+        
+        if (plan.exercises_details) {
+          try {
+            const parsed = JSON.parse(plan.exercises_details)
+            
+            // Check if it's the new daily plans structure
+            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].day) {
+              // It's the new daily plans structure
+              dailyPlans = parsed
+              // Extract all exercises from daily plans
+              parsed.forEach(dayPlan => {
+                if (dayPlan.workouts && Array.isArray(dayPlan.workouts)) {
+                  dayPlan.workouts.forEach(workout => {
+                    // Avoid duplicates
+                    if (!exercisesDetails.find(ex => ex.name === workout.workout_name)) {
+                      exercisesDetails.push({
+                        name: workout.workout_name,
+                        sets: workout.sets,
+                        reps: workout.reps,
+                        weight_kg: workout.weight_kg,
+                        training_minutes: workout.minutes,
+                        exercise_types: workout.exercise_types
+                      })
+                    }
+                  })
+                }
+              })
+            } else {
+              // It's the old exercises details structure
+              exercisesDetails = parsed
+            }
+          } catch (e) {
+            console.error('Error parsing exercises details:', e)
+          }
+        }
+        
+        return {
+          ...plan,
+          exercisesDetails: exercisesDetails,
+          dailyPlans: dailyPlans
+        }
+      })
+    }
+    
+    userStats.value = statsData
+    showStatsDialog.value = true
+  } catch (error) {
+    console.error('Error fetching user stats:', error)
+    userStats.value = { ongoing: [], completed: [] }
+    showStatsDialog.value = true
+  }
+}
+
+const viewUserTraining = (user) => {
+  selectedUserForStats.value = user
+  // Get all training plans for this user (both assigned and unassigned)
+  const userTrainingPlans = [...trainingPlans.value, ...myAssignments.value].filter(plan => plan.user_id === user.id)
+  
+  // Parse exercises details for each plan
+  const plansWithDetails = userTrainingPlans.map(plan => {
+    let exercisesDetails = []
+    if (plan.exercises_details) {
+      try {
+        exercisesDetails = JSON.parse(plan.exercises_details)
+      } catch (e) {
+        console.error('Error parsing exercises details:', e)
+      }
+    }
+    return {
+      ...plan,
+      exercisesDetails
+    }
+  })
+  
+  userStats.value = { 
+    trainingPlans: plansWithDetails,
+    ongoing: plansWithDetails.filter(plan => plan.status === 'ACTIVE' || plan.status === 'PLANNED'),
+    completed: plansWithDetails.filter(plan => plan.status === 'COMPLETED')
+  }
+  showStatsDialog.value = true
+}
+
+const viewTrainingPlanDetails = (plan) => {
+  selectedUserForStats.value = { name: 'Training Plan Details' }
+  
+  // Parse exercises details if available
+  let exercisesDetails = []
+  let dailyPlans = []
+  
+  if (plan.exercises_details) {
+    try {
+      const parsed = JSON.parse(plan.exercises_details)
+      // Check if it's the new daily plans structure
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].day) {
+        // It's the new daily plans structure
+        dailyPlans = parsed
+        // Extract all exercises from daily plans
+        exercisesDetails = []
+        parsed.forEach(dayPlan => {
+          if (dayPlan.workouts && Array.isArray(dayPlan.workouts)) {
+            dayPlan.workouts.forEach(workout => {
+              // Avoid duplicates
+              if (!exercisesDetails.find(ex => ex.name === workout.workout_name)) {
+                exercisesDetails.push({
+                  name: workout.workout_name,
+                  sets: workout.sets,
+                  reps: workout.reps,
+                  weight_kg: workout.weight_kg,
+                  training_minutes: workout.minutes,
+                  exercise_types: workout.exercise_types
+                })
+              }
+            })
+          }
+        })
+      } else {
+        // It's the old exercises details structure
+        exercisesDetails = parsed
+      }
+    } catch (e) {
+      console.error('Error parsing exercises details:', e)
+    }
+  }
+  
+  // Create plan with exercises details and daily plans
+  const planWithDetails = {
+    ...plan,
+    exercisesDetails: exercisesDetails,
+    dailyPlans: dailyPlans
+  }
+  
+  userStats.value = { 
+    trainingPlans: [planWithDetails],
+    exercisesDetails: exercisesDetails,
+    dailyPlans: dailyPlans,
+    ongoing: [],
+    completed: []
+  }
+  showStatsDialog.value = true
+}
+
+// Approval details dialog state
+const showApprovalDetails = ref(false)
+const approvalDetails = ref(null)
+
+const openApprovalDetails = async (id) => {
+  try {
+    const { data } = await api.get(`/trainingApprovals/${id}/detailed`)
+    approvalDetails.value = data.data
+    showApprovalDetails.value = true
+  } catch (e) {
+    console.error('Failed to load approval details', e)
+  }
+}
+
+const viewApprovalDetails = (id) => {
+  // Navigate to the dedicated view page
+  const routeName = authStore.role === 'GYM_ADMIN' ? 'GymAdminTrainingApprovalView' : 'TrainerTrainingApprovalView'
+  router.push({ name: routeName, params: { id } })
+}
+
+const approveRequest = async (id) => {
+  try {
+    await api.patch(`/trainingApprovals/${id}/status`, { approval_status: 'APPROVED' })
+    await loadApprovals()
+    showApprovalDetails.value = false
+  } catch (e) {
+    console.error('Failed to approve request', e)
+  }
+}
+
+const rejectRequest = async (id) => {
+  try {
+    await api.patch(`/trainingApprovals/${id}/status`, { approval_status: 'REJECTED' })
+    await loadApprovals()
+    showApprovalDetails.value = false
+  } catch (e) {
+    console.error('Failed to reject request', e)
+  }
+}
+
+const deleteTrainingApproval = async (id) => {
+  if (confirm('Are you sure you want to delete this training approval? This action cannot be undone.')) {
+    try {
+      await api.delete(`/trainingApprovals/${id}`)
+      // Remove from the local list immediately for better UX
+      approvals.value = approvals.value.filter(ap => ap.id !== id)
+      // Also refresh the list to ensure consistency
+      await loadApprovals()
+    } catch (e) {
+      console.error('Failed to delete training approval', e)
+      alert('Failed to delete training approval. Please try again.')
+    }
+  }
+}
+
+const assignTraining = async () => {
+  if (!selectedUser.value || !selectedCategory.value || !selectedUserLevel.value) return
+  try {
+    // Prefer plans with no user yet for the selected category and user level
+    const matchingPlans = trainingPlans.value
+      .filter(p => p.category === selectedCategory.value && p.user_level === selectedUserLevel.value)
+      .sort((a, b) => new Date(b.created_at || b.id) - new Date(a.created_at || a.id))
+
+    let planToAssign = matchingPlans.find(p => !p.user_id)
+    if (!planToAssign) planToAssign = matchingPlans[0] // fallback; server will clone to new user
+    if (!planToAssign) {
+      alert('No available plan found for the selected category and user level. Please create a plan first.')
+      return
+    }
+
+    // Assign via dedicated endpoint (works for trainers and gym admins)
+    const { data } = await api.patch(`/trainingPlans/${planToAssign.id}/assign`, {
+      user_id: selectedUser.value,
+      status: planToAssign.status || 'PLANNED'
+    })
+    // If created clone (201), notify; if 200 updated, also notify
+    if (data?.success) {
+      // noop; success handled below
+    }
+
+    // Show success dialog
+    const selectedUserData = userManagementStore.users.find(u => u.id === selectedUser.value)
+    assignedUserName.value = selectedUserData ? selectedUserData.name : 'User'
+    showAssignmentDialog.value = true
+    setTimeout(() => { showAssignmentDialog.value = false }, 2000)
+
+    // Reset UI and refresh lists
+    selectedUser.value = null
+    selectedCategory.value = null
+    selectedUserLevel.value = null
+    await loadTrainingPlans()
+    await loadMyAssignments()
+  } catch (error) {
+    console.error('Error assigning training plan:', error)
+    const msg = error.response?.data?.message
+    if (msg && msg.includes('already assigned')) {
+      alert(msg)
+    } else {
+      alert('Failed to assign training plan: ' + (msg || error.message))
+    }
+  }
+}
+
+const addExercise = () => {
+  if (newPlan.value.workout_name && newPlan.value.sets && newPlan.value.reps) {
+    newPlan.value.exercises.push({
+      name: newPlan.value.workout_name,
+      sets: newPlan.value.sets,
+      reps: newPlan.value.reps,
+      weight_kg: newPlan.value.weight_kg,
+      training_minutes: newPlan.value.training_minutes,
+      exercise_types: newPlan.value.exercise_types
+    })
+    
+    // Reset only exercise-specific fields, keep date range and category
+    newPlan.value.workout_name = ''
+    newPlan.value.training_minutes = 0
+    newPlan.value.sets = 0
+    newPlan.value.reps = 0
+    newPlan.value.weight_kg = 0
+    newPlan.value.exercise_types = null
+  }
+}
+
+const removeExercise = (index) => {
+  newPlan.value.exercises.splice(index, 1)
+}
+
+const addEditExercise = () => {
+    // Initialize exercises array if it doesn't exist
+    if (!editingPlan.value.exercises) {
+      editingPlan.value.exercises = []
+    }
+    
+  // Add a new empty exercise
+    editingPlan.value.exercises.push({
+    name: '',
+    sets: 0,
+    reps: 0,
+    weight_kg: 0,
+    training_minutes: 0,
+    exercise_types: ''
+  })
+}
+
+const removeEditExercise = (index) => {
+  editingPlan.value.exercises.splice(index, 1)
+}
+
+const createPlan = async () => {
+  creatingPlan.value = true
+  try {
+    console.log('Creating plan with data:', newPlan.value)
+    
+    // Validate required fields
+    if (!newPlan.value.start_date || !newPlan.value.end_date || !newPlan.value.category) {
+      alert('Please fill in all required fields (Start Date, End Date, Category)')
+      return
+    }
+    
+    if (!newPlan.value.workout_name && (!newPlan.value.exercises || newPlan.value.exercises.length === 0)) {
+      alert('Please add at least one workout or exercise')
+      return
+    }
+
+    // Create a single plan with all exercises combined
+    let workoutName = newPlan.value.workout_name
+    let totalTrainingMinutes = newPlan.value.training_minutes
+    let totalSets = newPlan.value.sets
+    let totalReps = newPlan.value.reps
+    let totalWeight = newPlan.value.weight_kg
+    let allExercises = []
+
+    // If there are exercises in the list, combine them
+    if (newPlan.value.exercises && newPlan.value.exercises.length > 0) {
+      // Create a combined workout name from all exercises
+      const exerciseNames = newPlan.value.exercises.map(ex => ex.name).join(', ')
+      workoutName = `${newPlan.value.category} Plan: ${exerciseNames}`
+      
+      // Sum up all the training details
+      totalTrainingMinutes = newPlan.value.exercises.reduce((sum, ex) => sum + (ex.training_minutes || 0), 0)
+      totalSets = newPlan.value.exercises.reduce((sum, ex) => sum + (ex.sets || 0), 0)
+      totalReps = newPlan.value.exercises.reduce((sum, ex) => sum + (ex.reps || 0), 0)
+      totalWeight = newPlan.value.exercises.reduce((sum, ex) => sum + (ex.weight_kg || 0), 0)
+      
+      // Store all exercises details for viewing
+      allExercises = newPlan.value.exercises
+    } else {
+      // If no exercises added, use the current form data as a single exercise
+      allExercises = [{
+        name: newPlan.value.workout_name,
+        sets: newPlan.value.sets,
+        reps: newPlan.value.reps,
+        weight_kg: newPlan.value.weight_kg,
+        training_minutes: newPlan.value.training_minutes,
+        exercise_types: newPlan.value.exercise_types
+      }]
+    }
+
+    const planData = {
+      user_id: selectedUser.value,
+      gym_id: authStore.user?.gym_id,
+      trainer_id: authStore.user?.id,
+      start_date: newPlan.value.start_date,
+      end_date: newPlan.value.end_date,
+      // Send both for compatibility
+      category: newPlan.value.category,
+      exercise_plan_category: newPlan.value.category,
+      user_level: newPlan.value.user_level,
+      workout_name: workoutName,
+      total_workouts: allExercises.length,
+      total_exercises: allExercises.length,
+      training_minutes: totalTrainingMinutes,
+      sets: totalSets,
+      reps: totalReps,
+      weight_kg: totalWeight,
+      status: 'PLANNED',
+      // New payload: items; keep exercises_details for backward compatibility
+      items: allExercises.map(ex => ({
+        workout_name: ex.name,
+        exercise_plan_category: newPlan.value.category,
+        exercise_types: ex.exercise_types,
+        user_level: newPlan.value.user_level,
+        sets: ex.sets,
+        reps: ex.reps,
+        weight_kg: ex.weight_kg,
+        minutes: ex.training_minutes
+      })),
+      exercises_details: JSON.stringify(allExercises)
+    }
+    
+    console.log('Sending plan data:', planData)
+    const response = await api.post('/trainingPlans/', planData)
+    console.log('Plan created successfully:', response.data)
+    
+    trainingPlans.value.push(response.data.data)
+    
+    closeCreatePlanDialog()
+    // Refresh the training plans list
+    await loadTrainingPlans()
+    
+    alert('Training plan created successfully!')
+  } catch (error) {
+    console.error('Error creating plan:', error)
+    alert('Error creating plan: ' + (error.response?.data?.message || error.message))
+  } finally {
+    creatingPlan.value = false
+  }
+}
+
+const editTrainingPlan = async (plan) => {
+  try {
+    // Check if this is an assignment (from myAssignments) or a template plan
+    const isAssignment = plan.user_id && !plan.web_plan_id
+    const endpoint = isAssignment ? `/trainingPlans/assignments/${plan.id}` : `/trainingPlans/${plan.id}`
+    
+    // Fetch fresh data from server to ensure we have the latest
+    const response = await api.get(endpoint)
+    const freshPlan = response.data.data
+    
+    // Parse existing exercises details if available
+    let existingExercises = []
+    if (freshPlan.exercises_details) {
+      try {
+        const parsed = JSON.parse(freshPlan.exercises_details)
+        console.log('🔍 Parsed exercises for edit:', parsed)
+        
+        // Check if it's the new daily plans structure or old exercises structure
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].day) {
+          // It's the new daily plans structure - extract exercises from daily plans
+          console.log('📅 Detected daily plans structure, extracting exercises...')
+          const exerciseMap = new Map()
+          
+          parsed.forEach(dayPlan => {
+            if (dayPlan.workouts && Array.isArray(dayPlan.workouts)) {
+              dayPlan.workouts.forEach(workout => {
+                const key = workout.workout_name || workout.name
+                if (key && !exerciseMap.has(key)) {
+                  exerciseMap.set(key, {
+                    name: workout.workout_name || workout.name,
+                    sets: workout.sets || 0,
+                    reps: workout.reps || 0,
+                    weight_kg: workout.weight_kg || workout.weight || 0,
+                    training_minutes: workout.minutes || workout.training_minutes || 0,
+                    exercise_types: workout.exercise_types || '',
+                    user_level: workout.user_level || freshPlan.user_level || 'Beginner'
+                  })
+                }
+              })
+            }
+          })
+          
+          existingExercises = Array.from(exerciseMap.values())
+          console.log('✅ Extracted exercises:', existingExercises)
+        } else {
+          // It's the old exercises structure
+          console.log('📝 Detected old exercises structure')
+          existingExercises = parsed
+        }
+      } catch (e) {
+        console.error('Error parsing exercises details:', e)
+      }
+    }
+    
+    editingPlan.value = { 
+      ...freshPlan,
+      exercises: existingExercises,
+      isAssignment: isAssignment
+    }
+    showEditPlanDialog.value = true
+  } catch (error) {
+    console.error('Error fetching plan for edit:', error)
+    // Fallback to local data if server fetch fails
+    let existingExercises = []
+    if (plan.exercises_details) {
+      try {
+        const parsed = JSON.parse(plan.exercises_details)
+        console.log('🔍 Fallback - Parsed exercises for edit:', parsed)
+        
+        // Check if it's the new daily plans structure or old exercises structure
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].day) {
+          // It's the new daily plans structure - extract exercises from daily plans
+          console.log('📅 Fallback - Detected daily plans structure, extracting exercises...')
+          const exerciseMap = new Map()
+          
+          parsed.forEach(dayPlan => {
+            if (dayPlan.workouts && Array.isArray(dayPlan.workouts)) {
+              dayPlan.workouts.forEach(workout => {
+                const key = workout.workout_name || workout.name
+                if (key && !exerciseMap.has(key)) {
+                  exerciseMap.set(key, {
+                    name: workout.workout_name || workout.name,
+                    sets: workout.sets || 0,
+                    reps: workout.reps || 0,
+                    weight_kg: workout.weight_kg || workout.weight || 0,
+                    training_minutes: workout.minutes || workout.training_minutes || 0,
+                    exercise_types: workout.exercise_types || '',
+                    user_level: workout.user_level || plan.user_level || 'Beginner'
+                  })
+                }
+              })
+            }
+          })
+          
+          existingExercises = Array.from(exerciseMap.values())
+          console.log('✅ Fallback - Extracted exercises:', existingExercises)
+        } else {
+          // It's the old exercises structure
+          console.log('📝 Fallback - Detected old exercises structure')
+          existingExercises = parsed
+        }
+      } catch (e) {
+        console.error('Error parsing exercises details:', e)
+      }
+    }
+    
+    editingPlan.value = { 
+      ...plan,
+      exercises: existingExercises
+    }
+    showEditPlanDialog.value = true
+  }
+}
+
+const updatePlan = async () => {
+  updatingPlan.value = true
+  try {
+    // Prepare update data with exercises details
+    const updateData = { ...editingPlan.value }
+    
+    // Remove frontend-only fields that don't exist in the database
+    delete updateData.user_name
+    delete updateData.user_phone
+    delete updateData.exercises // This is stored in exercises_details
+    delete updateData.isAssignment // This is a frontend-only flag
+    
+    // Ensure assign_to is set to current trainer if not already assigned
+    if (!updateData.assign_to && updateData.user_id) {
+      updateData.assign_to = authStore.user?.id
+    }
+    
+    // If there are exercises, update the exercises_details field
+    if (updateData.exercises && updateData.exercises.length > 0) {
+      updateData.exercises_details = JSON.stringify(updateData.exercises)
+      
+      // Update workout name to include all exercises
+      const exerciseNames = updateData.exercises.map(ex => ex.name).join(', ')
+      updateData.workout_name = `${updateData.category} Plan: ${exerciseNames}`
+      
+      // Recalculate totals
+      updateData.total_workouts = updateData.exercises.length
+      updateData.training_minutes = updateData.exercises.reduce((sum, ex) => sum + (ex.training_minutes || 0), 0)
+      updateData.sets = updateData.exercises.reduce((sum, ex) => sum + (ex.sets || 0), 0)
+      updateData.reps = updateData.exercises.reduce((sum, ex) => sum + (ex.reps || 0), 0)
+      updateData.weight_kg = updateData.exercises.reduce((sum, ex) => sum + (ex.weight_kg || 0), 0)
+    }
+    
+    // Remove the exercises array from the update data (it's stored in exercises_details)
+    delete updateData.exercises
+    
+    console.log('Updating plan with data:', updateData)
+    
+    // Use appropriate endpoint based on whether it's an assignment or template
+    const endpoint = editingPlan.value.isAssignment 
+      ? `/trainingPlans/assignments/${editingPlan.value.id}` 
+      : `/trainingPlans/${editingPlan.value.id}`
+    
+    const response = await api.put(endpoint, updateData)
+    console.log('Plan updated successfully:', response.data)
+    
+    const index = trainingPlans.value.findIndex(plan => plan.id === editingPlan.value.id)
+    if (index !== -1) {
+      trainingPlans.value[index] = response.data.data
+    }
+    const assignmentIndex = myAssignments.value.findIndex(plan => plan.id === editingPlan.value.id)
+    if (assignmentIndex !== -1) {
+      myAssignments.value[assignmentIndex] = response.data.data
+    }
+    
+    // Ensure lists are in sync with server (refresh training plans and assignments)
+    await loadTrainingPlans()
+    await loadMyAssignments()
+
+    closeEditPlanDialog()
+    alert('Training plan updated successfully!')
+  } catch (error) {
+    console.error('Error updating plan:', error)
+    alert('Error updating plan: ' + (error.response?.data?.message || error.message))
+  } finally {
+    updatingPlan.value = false
+  }
+}
+
+const deleteTrainingPlan = async (planId, isFromAssignments = false) => {
+  const message = isFromAssignments 
+    ? 'Are you sure you want to delete this assignment? It will be removed from the user and mobile app.'
+    : 'Are you sure you want to delete this training plan? This will permanently remove it.';
+    
+  if (confirm(message)) {
+    try {
+      if (isFromAssignments) {
+        // Delete assignment using the new assignment endpoint
+        await api.delete(`/trainingPlans/assignments/${planId}`)
+        // Remove from assignments list
+        myAssignments.value = myAssignments.value.filter(plan => plan.id !== planId)
+      } else {
+        // Delete template plan
+        await api.delete(`/trainingPlans/${planId}`)
+        // Remove from training plans list
+        trainingPlans.value = trainingPlans.value.filter(plan => plan.id !== planId)
+      }
+    } catch (error) {
+      console.error('Error deleting plan:', error)
+    }
+  }
+}
+
+const closeCreatePlanDialog = () => {
+  showCreatePlanDialog.value = false
+  newPlan.value = {
+    start_date: '',
+    end_date: '',
+    workout_name: '',
+    category: '',
+    user_level: 'Beginner',
+    exercise_types: null,
+    training_minutes: 0,
+    sets: 0,
+    reps: 0,
+    weight_kg: 0,
+    exercises: []
+  }
+  selectedUser.value = null
+}
+
+const closeEditPlanDialog = () => {
+  showEditPlanDialog.value = false
+  editingPlan.value = {}
+}
+
+const loadTrainingPlans = async () => {
+  try {
+    const response = await api.get('/trainingPlans/')
+    trainingPlans.value = response.data.data
+  } catch (error) {
+    console.error('Error loading training plans:', error)
+  }
+}
+
+const loadMyAssignments = async () => {
+  try {
+    const response = await api.get('/trainingPlans/assignments/my')
+    // Enrich with user name/phone from store
+    const usersById = new Map(userManagementStore.users.map(u => [u.id, u]))
+    myAssignments.value = (response.data.data || []).map(p => ({
+      ...p,
+      user_name: usersById.get(p.user_id)?.name || '',
+      user_phone: usersById.get(p.user_id)?.phone || ''
+    }))
+  } catch (error) {
+    console.error('Error loading my assignments:', error)
+  }
+}
+
+const loadApprovals = async () => {
+  try {
+    const { data } = await api.get('/trainingApprovals?approval_status=PENDING')
+    approvals.value = data.data || []
+  } catch (e) {
+    console.error('Error loading approvals', e)
+  }
+}
+
+const getTrainerName = (trainerId) => {
+  const trainer = trainerOptions.value.find(t => t.value === trainerId)
+  return trainer ? trainer.label : 'Unknown Trainer'
+}
+
+const getUserName = (userId) => {
+  const user = userManagementStore.users.find(u => u.id === userId)
+  return user?.name || 'Unknown User'
+}
+
+const getUserPhone = (userId) => {
+  const user = userManagementStore.users.find(u => u.id === userId)
+  return user?.phone || '-'
+}
+
+const getDefaultExercisesForCategory = (category) => {
+  const exerciseTemplates = {
+    'Muscle Gain': [
+      { name: 'Chest Press', sets: 3, reps: 12, weight_kg: 40, training_minutes: 30, total_workouts: 8 },
+      { name: 'Bicep Curls', sets: 3, reps: 10, weight_kg: 30, training_minutes: 25, total_workouts: 5 },
+      { name: 'Tricep Dips', sets: 3, reps: 15, weight_kg: 35, training_minutes: 35, total_workouts: 6 },
+      { name: 'Shoulder Press', sets: 3, reps: 12, weight_kg: 25, training_minutes: 20, total_workouts: 4 }
+    ],
+    'Muscle Lose': [
+      { name: 'Cardio Running', sets: 1, reps: 1, weight_kg: 0, training_minutes: 45, total_workouts: 10 },
+      { name: 'Burpees', sets: 3, reps: 20, weight_kg: 0, training_minutes: 30, total_workouts: 8 },
+      { name: 'Mountain Climbers', sets: 3, reps: 30, weight_kg: 0, training_minutes: 25, total_workouts: 6 },
+      { name: 'Jumping Jacks', sets: 3, reps: 50, weight_kg: 0, training_minutes: 20, total_workouts: 5 }
+    ],
+    'Strength': [
+      { name: 'Deadlifts', sets: 4, reps: 6, weight_kg: 80, training_minutes: 40, total_workouts: 6 },
+      { name: 'Squats', sets: 4, reps: 8, weight_kg: 60, training_minutes: 35, total_workouts: 8 },
+      { name: 'Bench Press', sets: 4, reps: 6, weight_kg: 70, training_minutes: 30, total_workouts: 5 },
+      { name: 'Pull-ups', sets: 3, reps: 8, weight_kg: 0, training_minutes: 25, total_workouts: 4 }
+    ]
+  }
+  
+  return exerciseTemplates[category] || [
+    { name: 'General Exercise', sets: 3, reps: 10, weight_kg: 20, training_minutes: 30, total_workouts: 5 }
+  ]
+}
+
+const getWorkoutNames = (plan) => {
+  // If there are exercises details, extract workout names from there
+  if (plan.exercises_details) {
+    try {
+      const exercises = JSON.parse(plan.exercises_details)
+      return exercises.map(ex => ex.name)
+    } catch (e) {
+      console.error('Error parsing exercises details:', e)
+    }
+  }
+  
+  // Fallback: extract from workout_name if it contains multiple workouts
+  if (plan.workout_name && plan.workout_name.includes(':')) {
+    const workoutPart = plan.workout_name.split(':')[1]
+    if (workoutPart) {
+      return workoutPart.split(',').map(name => name.trim())
+    }
+  }
+  
+  // Single workout name
+  return [plan.workout_name || 'Unknown Workout']
+}
+
+const refreshAllPlans = async () => {
+  await loadTrainingPlans()
+  await loadMyAssignments()
+}
+
+// Lifecycle
+onMounted(async () => {
+  await userManagementStore.fetchUsers()
+  await loadTrainingPlans()
+  await loadMyAssignments()
+  await loadApprovals()
+
+  // Realtime updates for approvals
+  try {
+    const token = localStorage.getItem('token')
+    const socket = io('http://localhost:5000', {
+      path: '/socket.io',
+      auth: { token }
+    })
+    socket.on('connect_error', (err) => console.error('Socket error', err.message))
+    socket.on('trainingApproval:created', (row) => {
+      approvals.value = [row, ...approvals.value]
+    })
+    socket.on('trainingApproval:updated', (row) => {
+      approvals.value = approvals.value.map(a => a.id === row.id ? row : a)
+    })
+    socket.on('trainingApproval:deleted', ({ id }) => {
+      approvals.value = approvals.value.filter(a => a.id !== id)
+    })
+    socket.on('trainingApproval:status', (row) => {
+      approvals.value = approvals.value.filter(a => a.id !== row.id)
+    })
+  } catch (e) {
+    console.error('Failed to init socket', e)
+  }
+})
+</script>
+
+<style scoped>
+.trainer-scheduler-page {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.page-header {
+  margin-bottom: 2rem;
+}
+
+.page-header h1 {
+  color: #333;
+  margin-bottom: 0.5rem;
+  font-size: 2rem;
+}
+
+.page-header p {
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.section {
+  margin-bottom: 3rem;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.section-header h2 {
+  color: #333;
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.search-container {
+  width: 300px;
+}
+
+.user-table {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.action-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.assign-training-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  margin-bottom: 2rem;
+}
+
+.assign-training-card h3 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.assign-form {
+  width: 100%;
+}
+
+.form-row {
+  display: flex;
+  gap: 1rem;
+  align-items: end;
+}
+
+.user-select {
+  flex: 2;
+}
+
+.category-select {
+  flex: 1;
+}
+
+.training-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+.training-card {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transition: transform 0.2s;
+}
+
+.training-card:hover {
+  transform: translateY(-2px);
+}
+
+.assignment-card {
+  border-left: 4px solid #2196f3;
+}
+
+.assignment-badge {
+  font-size: 0.75rem;
+}
+
+.training-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+.training-card {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transition: transform 0.2s;
+}
+
+.training-card:hover {
+  transform: translateY(-2px);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.card-header h4 {
+  margin: 0;
+  color: #333;
+  font-size: 1.2rem;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.plan-details p {
+  margin: 0.5rem 0;
+  color: #666;
+}
+
+.plan-main-info {
+  margin-bottom: 1rem;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.info-item span {
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.plan-status {
+  border-top: 1px solid #e9ecef;
+  padding-top: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.no-plans {
+  text-align: center;
+  padding: 3rem;
+  color: #999;
+}
+
+.no-plans p {
+  margin-top: 1rem;
+  font-size: 1.1rem;
+}
+
+.form-section {
+  margin-bottom: 2rem;
+}
+
+.form-section h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.date-range {
+  display: flex;
+  gap: 1rem;
+}
+
+.date-input {
+  flex: 1;
+}
+
+.exercise-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.form-field {
+  width: 100%;
+}
+
+.exercises-list {
+  margin: 1rem 0;
+}
+
+.exercise-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.add-exercise-btn {
+  margin-top: 1rem;
+}
+
+.stats-content {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.stats-section {
+  margin-bottom: 2rem;
+}
+
+.stats-section h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.workout-item {
+  padding: 1rem;
+  background: #f5f5f5;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.workout-item p {
+  margin: 0.25rem 0;
+  color: #666;
+}
+
+.training-plan-item {
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  border: 1px solid #e9ecef;
+}
+
+.plan-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.plan-header h5 {
+  margin: 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.plan-details p {
+  margin: 0.25rem 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.plan-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  justify-content: flex-end;
+}
+
+.plan-overview {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.exercises-details {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #e3f2fd;
+  border-radius: 6px;
+  border-left: 4px solid #2196f3;
+}
+
+.exercises-details h6 {
+  margin: 0 0 1rem 0;
+  color: #1976d2;
+  font-size: 1rem;
+}
+
+.exercises-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.exercise-detail-item {
+  padding: 0.75rem;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+}
+
+.exercise-info .exercise-name {
+  display: block;
+  margin: 0 0 0.25rem 0;
+  color: #333;
+  font-size: 0.95rem;
+}
+
+.exercise-info p {
+  margin: 0;
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.workout-names-section {
+  margin-bottom: 1rem;
+}
+
+.workout-names-section h5 {
+  margin: 0 0 0.5rem 0;
+  color: #333;
+  font-size: 1rem;
+}
+
+.workout-names-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.workout-name-tag {
+  background: #e3f2fd;
+  color: #1976d2;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border: 1px solid #bbdefb;
+}
+
+.duration-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.duration-section span {
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.other-details-section {
+  border-top: 1px solid #e9ecef;
+  padding-top: 1rem;
+}
+
+.detail-row {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.detail-row span {
+  color: #666;
+  font-size: 0.85rem;
+  min-width: fit-content;
+}
+
+.workout-cards-section {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.workout-cards-section h6 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 1.1rem;
+  text-align: center;
+}
+
+.workout-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.workout-detail-card {
+  background: #4caf50;
+  border-radius: 8px;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.workout-detail-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.workout-card-header {
+  background: transparent;
+  color: white;
+  padding: 0.75rem 1rem;
+  border-radius: 8px 8px 0 0;
+  text-align: left;
+}
+
+.workout-card-header .exercise-name {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: bold;
+  color: white;
+}
+
+.workout-card-content {
+  padding: 0 1rem 1rem 1rem;
+}
+
+.workout-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.workout-detail-row:last-child {
+  margin-bottom: 0;
+}
+
+.detail-label {
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.detail-value {
+  color: white;
+  font-size: 0.9rem;
+  font-weight: bold;
+}
+
+.no-exercises-message {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.no-exercises-message p {
+  margin: 0;
+  color: #856404;
+  font-size: 0.9rem;
+}
+
+.assignment-success {
+  padding: 2rem;
+}
+
+.success-title {
+  margin: 1rem 0;
+  color: #333;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.user-name {
+  margin: 1rem 0 2rem 0;
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.loading-bar {
+  margin-top: 1rem;
+}
+
+.progress-bar {
+  height: 4px;
+  border-radius: 2px;
+}
+
+@media (max-width: 768px) {
+  .trainer-scheduler-page {
+    padding: 1rem;
+  }
+  
+  .section-header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+  
+  .search-container {
+    width: 100%;
+  }
+  
+  .form-row {
+    flex-direction: column;
+  }
+  
+  .training-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .exercise-form {
+    grid-template-columns: 1fr;
+  }
+  
+  .date-range {
+    flex-direction: column;
+  }
+  
+  .training-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .workout-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .detail-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
+.exercise-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  transition: box-shadow 0.2s ease;
+}
+
+.exercise-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Exercise Header Styles */
+.exercise-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.exercise-header h5 {
+  margin: 0;
+  color: #333;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.exercise-item {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.exercise-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Daily Plans Section Styles */
+.daily-plans-section {
+  margin-top: 1.5rem;
+}
+
+.daily-plans-section h6 {
+  margin: 0 0 1rem 0;
+  color: #333;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.daily-plans-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.day-plan-card {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 1rem;
+  transition: box-shadow 0.2s ease;
+}
+
+.day-plan-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.day-header strong {
+  color: #333;
+  font-size: 1rem;
+}
+
+.day-date {
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.day-workouts {
+  margin-bottom: 0.75rem;
+}
+
+.workout-item {
+  background: white;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.workout-item:last-child {
+  margin-bottom: 0;
+}
+
+.workout-name {
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.workout-details {
+  color: #666;
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.day-summary {
+  text-align: center;
+  padding-top: 0.5rem;
+  border-top: 1px solid #dee2e6;
+  color: #666;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.more-days {
+  text-align: center;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px dashed #dee2e6;
+}
+
+.more-days p {
+  margin: 0;
+  color: #666;
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  .trainer-scheduler-page {
+    padding: 1rem;
+  }
+  
+  .section-header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+  
+  .search-container {
+    width: 100% !important;
+  }
+  
+  .training-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .user-table {
+    font-size: 0.8rem;
+  }
+  
+  .action-buttons {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  
+  .create-plan-dialog {
+    margin: 0;
+    max-width: 100vw;
+    max-height: 100vh;
+  }
+  
+  .view-plan-dialog {
+    margin: 0;
+    max-width: 100vw;
+    max-height: 100vh;
+  }
+  
+  .user-table-container {
+    overflow-x: auto;
+  }
+  
+  .training-card {
+    margin-bottom: 1rem;
+  }
+  
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .detail-row {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  
+  .daily-plans-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .day-plan-card {
+    padding: 0.75rem;
+  }
+  
+  .workout-item {
+    padding: 0.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .trainer-scheduler-page {
+    padding: 0.5rem;
+  }
+  
+  .page-header h1 {
+    font-size: 1.5rem;
+  }
+  
+  .section-header h2 {
+    font-size: 1.2rem;
+  }
+  
+  .training-card {
+    padding: 1rem;
+  }
+  
+  .user-table {
+    font-size: 0.7rem;
+  }
+  
+  .q-btn {
+    font-size: 0.8rem;
+    padding: 0.5rem;
+  }
+  
+  .day-plan-card {
+    padding: 0.5rem;
+  }
+  
+  .workout-item {
+    padding: 0.4rem;
+  }
+}
+
+/* Enhanced Styling for New Components */
+.header-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+}
+
+.header-card .q-card-section {
+  background: transparent;
+}
+
+.header-content .text-h4 {
+  color: white !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.header-content .text-subtitle1 {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.approval-section-card,
+.user-list-card,
+.planned-trainings-card,
+.training-plans-card {
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.approval-section-card::before,
+.user-list-card::before,
+.planned-trainings-card::before,
+.training-plans-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+}
+
+.approval-section-card:hover,
+.user-list-card:hover,
+.planned-trainings-card:hover,
+.training-plans-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+.search-input .q-field__control {
+  border-radius: 12px;
+  border: 2px solid rgba(102, 126, 234, 0.2);
+  background: white;
+  transition: all 0.3s ease;
+}
+
+.search-input .q-field__control:hover {
+  border-color: rgba(102, 126, 234, 0.4);
+}
+
+.search-input .q-field--focused .q-field__control {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.training-card,
+.training-plan-card {
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  overflow: hidden;
+  position: relative;
+}
+
+.training-card::before,
+.training-plan-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+}
+
+.training-card:hover,
+.training-plan-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
+.training-card-header,
+.training-plan-header {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.plan-info .text-h6 {
+  color: #667eea;
+  font-weight: 700;
+}
+
+.training-card-content,
+.training-plan-content {
+  padding: 20px;
+}
+
+.plan-details {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.02) 0%, rgba(118, 75, 162, 0.02) 100%);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.detail-item .text-caption {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-item .text-body2 {
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.status-badge {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.training-card-actions,
+.training-plan-actions {
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-top: 1px solid #e0e0e0;
+  gap: 12px;
+}
+
+.action-btn {
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.user-table {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.user-table .q-table thead th {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 0.85rem;
+  border: none;
+  padding: 16px 12px;
+}
+
+.user-table .q-table tbody tr:hover {
+  background: rgba(102, 126, 234, 0.05);
+  transform: scale(1.01);
+}
+
+.user-id-badge {
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.user-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.payment-badge {
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 6px 12px;
+}
+
+.assign-training-card {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.1);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.form-field .q-field__control {
+  border-radius: 12px;
+  border: 2px solid rgba(102, 126, 234, 0.2);
+  transition: all 0.3s ease;
+}
+
+.form-field .q-field__control:hover {
+  border-color: rgba(102, 126, 234, 0.4);
+}
+
+.form-field .q-field--focused .q-field__control {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.assign-btn,
+.create-plan-btn,
+.refresh-btn {
+  border-radius: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.5px;
+  padding: 12px 24px;
+}
+
+.empty-state-card {
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.02) 0%, rgba(118, 75, 162, 0.02) 100%);
+}
+</style>

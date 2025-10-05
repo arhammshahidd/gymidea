@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { createDistributedPlan } = require('../utils/exerciseDistribution');
 
 // List approvals
 exports.list = async (req, res, next) => {
@@ -81,13 +82,24 @@ exports.create = async (req, res, next) => {
           user_level: body.user_level ?? 'Beginner',
           approval_status: 'PENDING',
           notes: body.notes || null,
+          // New fields for enhanced data structure
+          plan_id: body.plan_id || null,
+          plan_type: body.plan_type || 'manual',
+          exercise_plan_category: body.exercise_plan_category || body.category,
+          items: body.items ? JSON.stringify(body.items) : null,
+          daily_plans: body.daily_plans ? JSON.stringify(body.daily_plans) : null,
+          total_exercises: body.total_exercises || (body.items ? body.items.length : 0),
+          exercises_details: body.exercises_details || (body.items ? JSON.stringify(body.items) : null),
         })
         .returning('*');
 
       // Emit realtime event
       try {
         const io = req.app.get('io');
-        if (io) io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:created', { ...row, source: 'mobile_app' });
+        if (io) {
+          io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:created', { ...row, source: 'mobile_app' });
+          if (row.user_id) io.to(`user:${row.user_id}`).emit('trainingApproval:created', { ...row, source: 'mobile_app' });
+        }
       } catch (e) {}
       
       res.status(201).json({ 
@@ -128,13 +140,24 @@ exports.create = async (req, res, next) => {
           user_level: body.user_level ?? 'Beginner',
           approval_status: body.approval_status ?? 'PENDING',
           notes: body.notes ?? null,
+          // New fields for enhanced data structure
+          plan_id: body.plan_id || null,
+          plan_type: body.plan_type || 'manual',
+          exercise_plan_category: body.exercise_plan_category || body.category,
+          items: body.items ? JSON.stringify(body.items) : null,
+          daily_plans: body.daily_plans ? JSON.stringify(body.daily_plans) : null,
+          total_exercises: body.total_exercises || (body.items ? body.items.length : 0),
+          exercises_details: body.exercises_details || (body.items ? JSON.stringify(body.items) : null),
         })
         .returning('*');
       
       // Emit realtime event
       try {
         const io = req.app.get('io');
-        if (io) io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:created', row);
+        if (io) {
+          io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:created', row);
+          if (row.user_id) io.to(`user:${row.user_id}`).emit('trainingApproval:created', row);
+        }
       } catch (e) {}
       
       res.status(201).json({ success: true, data: row });
@@ -165,7 +188,10 @@ exports.update = async (req, res, next) => {
     if (!row) return res.status(404).json({ success: false, message: 'Approval not found' });
     try {
       const io = req.app.get('io');
-      if (io) io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:updated', row);
+      if (io) {
+        io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:updated', row);
+        if (row.user_id) io.to(`user:${row.user_id}`).emit('trainingApproval:updated', row);
+      }
     } catch (e) {}
     res.json({ success: true, data: row });
   } catch (err) { next(err); }
@@ -191,14 +217,152 @@ exports.updateStatus = async (req, res, next) => {
     const { id } = req.params;
     const { approval_status } = req.body;
     if (!approval_status) return res.status(400).json({ success: false, message: 'approval_status is required' });
+    
     const [row] = await db('training_approvals')
       .where({ id, gym_id: req.user.gym_id })
       .update({ approval_status })
       .returning('*');
     if (!row) return res.status(404).json({ success: false, message: 'Approval not found' });
+
+    // If approved, create a training plan assignment
+    if (approval_status === 'APPROVED') {
+      try {
+        // Parse exercises and create distributed plan
+        let exercises = [];
+        if (row.items) {
+          try {
+            exercises = JSON.parse(row.items);
+          } catch (e) {
+            console.error('Error parsing items:', e);
+          }
+        }
+        
+        if (exercises.length === 0 && row.exercises_details) {
+          try {
+            exercises = JSON.parse(row.exercises_details);
+          } catch (e) {
+            console.error('Error parsing exercises_details:', e);
+          }
+        }
+
+        // Create distributed plan
+        const distributedPlan = createDistributedPlan(
+          { items: exercises },
+          new Date(row.start_date),
+          new Date(row.end_date)
+        );
+
+        // Create a training plan first
+        const [trainingPlan] = await db('training_plans')
+          .insert({
+            gym_id: req.user.gym_id,
+            user_id: row.user_id,
+            trainer_id: req.user.id, // Current user (trainer/gym_admin) becomes the trainer
+            start_date: row.start_date,
+            end_date: row.end_date,
+            workout_name: row.workout_name,
+            category: row.category || row.plan_category_name,
+            user_level: row.user_level || 'Beginner',
+            status: 'ACTIVE',
+            total_workouts: distributedPlan.total_exercises || row.total_workouts || 0,
+            total_exercises: distributedPlan.total_exercises || 0,
+            training_minutes: distributedPlan.total_training_minutes || row.total_training_minutes || row.minutes || 0,
+            sets: row.sets || 0,
+            reps: row.reps || 0,
+            weight_kg: row.weight_kg || 0,
+            exercises_details: JSON.stringify(distributedPlan.daily_plans),
+            assign_to: row.user_id,
+            created_by: req.user.id
+          })
+          .returning('*');
+
+        // Create training plan assignment
+        const [assignment] = await db('training_plan_assignments')
+          .insert({
+            gym_id: req.user.gym_id,
+            web_plan_id: trainingPlan.id,
+            trainer_id: req.user.id,
+            user_id: row.user_id,
+            start_date: row.start_date,
+            end_date: row.end_date,
+            category: row.category || row.plan_category_name,
+            user_level: row.user_level || 'Beginner',
+            status: 'ACTIVE',
+            total_workouts: distributedPlan.total_exercises || row.total_workouts || 0,
+            total_exercises: distributedPlan.total_exercises || 0,
+            training_minutes: distributedPlan.total_training_minutes || row.total_training_minutes || row.minutes || 0,
+            sets: row.sets || 0,
+            reps: row.reps || 0,
+            weight_kg: row.weight_kg || 0,
+            exercises_details: JSON.stringify(distributedPlan.daily_plans),
+          })
+          .returning('*');
+
+        // Mirror assignment to mobile app
+        try {
+          const [mobilePlan] = await db('app_manual_training_plans')
+            .insert({
+              user_id: row.user_id,
+              gym_id: req.user.gym_id,
+              exercise_plan_category: assignment.category,
+              start_date: assignment.start_date,
+              end_date: assignment.end_date,
+              total_workouts: assignment.total_workouts || 0,
+              total_exercises: assignment.total_exercises || 0,
+              training_minutes: assignment.training_minutes || 0,
+              status: 'ACTIVE',
+              web_plan_id: assignment.id,
+            })
+            .returning('*');
+
+          // Add exercise items from distributed daily plans
+          if (distributedPlan.daily_plans && distributedPlan.daily_plans.length > 0) {
+            try {
+              const allExercises = [];
+              
+              // Flatten all exercises from daily plans
+              distributedPlan.daily_plans.forEach((dayPlan) => {
+                if (dayPlan.workouts && dayPlan.workouts.length > 0) {
+                  dayPlan.workouts.forEach((exercise) => {
+                    allExercises.push({
+                      plan_id: mobilePlan.id,
+                      workout_name: exercise.name || exercise.workout_name,
+                      exercise_plan_category: exercise.exercise_plan_category || assignment.category || null,
+                      exercise_types: exercise.exercise_types ?? null,
+                      sets: Number(exercise.sets || 0),
+                      reps: Number(exercise.reps || 0),
+                      weight_kg: Number(exercise.weight_kg ?? exercise.weight ?? 0),
+                      minutes: Number(exercise.training_minutes ?? exercise.minutes ?? 0),
+                      user_level: exercise.user_level || assignment.user_level || 'Beginner',
+                    });
+                  });
+                }
+              });
+              
+              if (allExercises.length) {
+                await db('app_manual_training_plan_items').insert(allExercises);
+              }
+            } catch (parseErr) {
+              console.error('Error creating mobile exercise items:', parseErr);
+            }
+          }
+        } catch (mobileErr) {
+          console.error('Error creating mobile plan mirror:', mobileErr);
+        }
+
+        console.log('Training plan assignment created successfully:', assignment.id);
+      } catch (assignmentErr) {
+        console.error('Error creating training plan assignment:', assignmentErr);
+        // Don't fail the approval if assignment creation fails
+      }
+    }
+
     try {
       const io = req.app.get('io');
-      if (io) io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:status', row);
+      if (io) {
+        io.to(`gym:${req.user.gym_id}`).emit('trainingApproval:status', row);
+        if (row.user_id) io.to(`user:${row.user_id}`).emit('trainingApproval:status', row);
+      }
     } catch (e) {}
     res.json({ success: true, data: row });
   } catch (err) { next(err); }
@@ -311,7 +475,29 @@ exports.getDetailed = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Approval not found' });
     }
 
-    // Parse exercises details if available
+    // Parse items (all exercises) if available
+    let items = [];
+    if (row.items) {
+      try {
+        items = JSON.parse(row.items);
+      } catch (e) {
+        console.error('Error parsing items:', e);
+        items = [];
+      }
+    }
+
+    // Parse daily plans if available
+    let dailyPlans = [];
+    if (row.daily_plans) {
+      try {
+        dailyPlans = JSON.parse(row.daily_plans);
+      } catch (e) {
+        console.error('Error parsing daily plans:', e);
+        dailyPlans = [];
+      }
+    }
+
+    // Parse exercises details if available (backward compatibility)
     let workoutPlan = [];
     if (row.exercises_details) {
       try {
@@ -322,15 +508,23 @@ exports.getDetailed = async (req, res, next) => {
       }
     }
 
-    // If no exercises_details, create a basic workout plan from the main record
-    if (workoutPlan.length === 0 && row.workout_name) {
-      workoutPlan = [{
+    // If no items but we have exercises_details, use that
+    if (items.length === 0 && workoutPlan.length > 0) {
+      items = workoutPlan;
+    }
+
+    // If no items or exercises_details, create a basic workout plan from the main record
+    if (items.length === 0 && row.workout_name) {
+      items = [{
         name: row.workout_name,
+        workout_name: row.workout_name,
         sets: row.sets || 0,
         reps: row.reps || 0,
         weight: row.weight_kg || 0,
+        weight_kg: row.weight_kg || 0,
         exercise_types: row.exercise_types || '',
-        training_minutes: row.minutes || 0
+        training_minutes: row.minutes || 0,
+        minutes: row.minutes || 0
       }];
     }
 
@@ -343,8 +537,10 @@ exports.getDetailed = async (req, res, next) => {
 
     const detailedData = {
       ...row,
-      workout_plan: workoutPlan,
-      total_exercises: workoutPlan.length
+      items: items,
+      daily_plans: dailyPlans,
+      workout_plan: items, // For backward compatibility
+      total_exercises: items.length
     };
 
     res.json({ success: true, data: detailedData });

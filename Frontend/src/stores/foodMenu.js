@@ -261,13 +261,16 @@ export const useFoodMenuStore = defineStore('foodMenu', {
     async assignFoodMenuToUser({ user_id, food_menu_id, start_date, end_date, notes }) {
       try {
         this.error = null
-        const response = await api.post('/foodMenu/assign', {
+        const payload = {
           user_id,
           food_menu_id,
           start_date,
           end_date,
           notes
-        })
+        }
+        console.log('Store: Assigning food menu with payload:', payload)
+        const response = await api.post('/foodMenu/assign', payload)
+        console.log('Store: Assignment response:', response.data)
         return response.data
       } catch (error) {
         this.error = error.response?.data?.message || 'Failed to assign food menu'
@@ -276,10 +279,44 @@ export const useFoodMenuStore = defineStore('foodMenu', {
       }
     },
 
+    async updateAssignment(id, assignmentData) {
+      try {
+        this.error = null
+        console.log('Store: Updating assignment with ID:', id, 'Data:', assignmentData)
+        
+        const response = await api.put(`/foodMenu/assignments/${id}`, assignmentData)
+        console.log('Store: Update assignment response:', response.data)
+        
+        return response.data
+      } catch (error) {
+        this.error = error.response?.data?.message || 'Failed to update assignment'
+        console.error('Store: Error updating assignment:', error)
+        throw error
+      }
+    },
+
+    async deleteAssignment(id) {
+      try {
+        this.error = null
+        console.log('Store: Deleting assignment with ID:', id)
+        
+        const response = await api.delete(`/foodMenu/assignments/${id}`)
+        console.log('Store: Delete assignment response:', response.data)
+        
+        return true
+      } catch (error) {
+        this.error = error.response?.data?.message || 'Failed to delete assignment'
+        console.error('Store: Error deleting assignment:', error)
+        throw error
+      }
+    },
+
     async fetchUserAssignments(user_id) {
       try {
         this.error = null
+        console.log('Store: Fetching assignments for user_id:', user_id)
         const response = await api.get('/foodMenu/assignments', { params: { user_id } })
+        console.log('Store: Raw response from backend:', response.data)
         return response.data.data
       } catch (error) {
         this.error = error.response?.data?.message || 'Failed to fetch user assignments'

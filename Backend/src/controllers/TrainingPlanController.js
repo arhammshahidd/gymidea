@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { createDistributedPlan } = require('../utils/exerciseDistribution');
 
 // List training plans (scoped to gym)
 exports.list = async (req, res, next) => {
@@ -21,6 +22,25 @@ exports.list = async (req, res, next) => {
 // Create training plan
 exports.create = async (req, res, next) => {
   try {
+    console.log('=== CREATE PLAN REQUEST ===');
+    console.log('Request body:', req.body);
+    console.log('Workout name from request:', req.body.workout_name);
+    console.log('Category from request:', req.body.category);
+    console.log('Exercises details from request:', req.body.exercises_details);
+    console.log('User from request:', req.user);
+    console.log('Gym ID from request:', req.user?.gym_id);
+    
+    // Check if user is authenticated
+    if (!req.user) {
+      console.error('No user found in request - authentication failed');
+      return res.status(401).json({ success: false, message: 'Authentication required' });
+    }
+    
+    if (!req.user.gym_id) {
+      console.error('No gym_id found in user object');
+      return res.status(400).json({ success: false, message: 'Gym ID is required' });
+    }
+    
     const {
       trainer_id,
       user_id,
@@ -60,11 +80,14 @@ exports.create = async (req, res, next) => {
       const normalized = items.map((it) => {
         const row = {
           name: it.workout_name,
+          workout_name: it.workout_name,
           exercise_plan_category: it.exercise_plan_category ?? resolvedCategory ?? null,
           sets: Number(it.sets || 0),
           reps: Number(it.reps || 0),
           weight: Number(it.weight_kg || 0),
+          weight_kg: Number(it.weight_kg || 0),
           training_minutes: Number(it.minutes || 0),
+          minutes: Number(it.minutes || 0),
         };
         if (it.exercise_types !== undefined && it.exercise_types !== null && it.exercise_types !== '') {
           row.exercise_types = it.exercise_types;
@@ -72,14 +95,21 @@ exports.create = async (req, res, next) => {
         return row;
       });
 
-      normalizedExercisesDetails = JSON.stringify(normalized);
+      // Create distributed plan
+      const distributedPlan = createDistributedPlan(
+        { items: normalized },
+        new Date(start_date),
+        new Date(end_date)
+      );
+
+      normalizedExercisesDetails = JSON.stringify(distributedPlan.daily_plans);
       computedWorkoutName = computedWorkoutName || normalized.map(n => n.name).filter(Boolean).join(', ');
-      computedTotalWorkouts = computedTotalWorkouts ?? normalized.length;
-      computedTrainingMinutes = computedTrainingMinutes ?? normalized.reduce((s, n) => s + (n.training_minutes || 0), 0);
+      computedTotalWorkouts = computedTotalWorkouts ?? distributedPlan.total_exercises;
+      computedTrainingMinutes = computedTrainingMinutes ?? distributedPlan.total_training_minutes;
       computedSets = computedSets ?? normalized.reduce((s, n) => s + (n.sets || 0), 0);
       computedReps = computedReps ?? normalized.reduce((s, n) => s + (n.reps || 0), 0);
       computedWeightKg = computedWeightKg ?? normalized.reduce((s, n) => s + (n.weight || 0), 0);
-      computedTotalExercises = computedTotalExercises ?? normalized.length;
+      computedTotalExercises = computedTotalExercises ?? distributedPlan.total_exercises;
     }
 
     if (!start_date || !end_date || !resolvedCategory) {
@@ -92,7 +122,7 @@ exports.create = async (req, res, next) => {
     // Ensure all numeric fields are properly converted to integers
     const planData = {
       gym_id: req.user.gym_id,
-      trainer_id: trainer_id ? parseInt(trainer_id) : null,
+      trainer_id: trainer_id ? parseInt(trainer_id) : req.user.id,
       user_id: user_id ? parseInt(user_id) : null,
       start_date,
       end_date,
@@ -103,7 +133,8 @@ exports.create = async (req, res, next) => {
       training_minutes: parseInt(computedTrainingMinutes ?? 0),
       sets: parseInt(computedSets ?? 0),
       reps: parseInt(computedReps ?? 0),
-      weight_kg: parseInt(computedWeightKg ?? 0),
+      weight_kg: computedWeightKg ?? '',
+      exercise_types: null, // Will be calculated from exercises
       status: status ?? 'PLANNED',
       assign_to: assign_to ? parseInt(assign_to) : null,
       exercises_details: normalizedExercisesDetails ?? exercises_details ?? null,
@@ -111,10 +142,23 @@ exports.create = async (req, res, next) => {
     };
 
     console.log('Inserting plan data:', planData);
+    console.log('Exercises details being inserted:', planData.exercises_details);
+    console.log('Workout name being inserted:', planData.workout_name);
+    console.log('Gym ID being inserted:', planData.gym_id);
+    console.log('Trainer ID being inserted:', planData.trainer_id);
 
-    const [plan] = await db('training_plans')
-      .insert(planData)
-      .returning('*');
+    console.log('About to insert plan data into database...');
+    let plan;
+    try {
+      [plan] = await db('training_plans')
+        .insert(planData)
+        .returning('*');
+      console.log('Plan inserted successfully:', plan);
+    } catch (dbError) {
+      console.error('Database insert error:', dbError);
+      console.error('Plan data that failed to insert:', planData);
+      throw dbError;
+    }
 
     // Mirror to Mobile App tables so it appears in the app immediately
     try {
@@ -126,8 +170,8 @@ exports.create = async (req, res, next) => {
           if (Array.isArray(parsed)) {
             mobileItems = parsed.map((ex) => ({
               workout_name: ex.name || ex.workout_name,
-              exercise_plan_category: ex.exercise_plan_category || resolvedCategory || null,
-              exercise_types: (ex.exercise_types !== undefined && ex.exercise_types !== null && ex.exercise_types !== '') ? ex.exercise_types : undefined,
+              exercise_plan_category: resolvedCategory || null,
+              exercise_types: ex.exercise_types ?? null,
               sets: ex.sets || 0,
               reps: ex.reps || 0,
               weight_kg: ex.weight_kg ?? ex.weight ?? 0,
@@ -190,9 +234,17 @@ exports.get = async (req, res, next) => {
 // Update plan
 exports.update = async (req, res, next) => {
   try {
+    console.log('Update request received:', req.params, req.body);
+    console.log('Exercises details in request:', req.body.exercises_details);
+    console.log('Exercises details type:', typeof req.body.exercises_details);
     const { id } = req.params;
     const updateData = { ...req.body };
     delete updateData.gym_id;
+    
+    // Ensure trainer_id is set from authenticated user
+    if (!updateData.trainer_id && req.user.id) {
+      updateData.trainer_id = req.user.id;
+    }
     
     // Ensure numeric fields are properly converted
     if (updateData.trainer_id) updateData.trainer_id = parseInt(updateData.trainer_id);
@@ -202,14 +254,22 @@ exports.update = async (req, res, next) => {
     if (updateData.training_minutes) updateData.training_minutes = parseInt(updateData.training_minutes);
     if (updateData.sets) updateData.sets = parseInt(updateData.sets);
     if (updateData.reps) updateData.reps = parseInt(updateData.reps);
-    if (updateData.weight_kg) updateData.weight_kg = parseInt(updateData.weight_kg);
+    // Remove exercise_types from update data since it's now in exercises_details JSON
+    delete updateData.exercise_types;
+    // Keep weight_kg as text to support ranges like "20-40"
+    // if (updateData.weight_kg) updateData.weight_kg = parseInt(updateData.weight_kg);
     if (updateData.assign_to) updateData.assign_to = parseInt(updateData.assign_to);
+    
+    console.log('Updating plan with data:', updateData);
+    console.log('Exercises details being updated:', updateData.exercises_details);
     
     const [updated] = await db('training_plans')
       .where({ id, gym_id: req.user.gym_id })
       .update(updateData)
       .returning('*');
     if (!updated) return res.status(404).json({ success: false, message: 'Plan not found' });
+    
+    console.log('Updated plan result:', updated);
     
     // Mirror exercises changes to mobile items when exercises_details provided
     try {
@@ -241,7 +301,10 @@ exports.update = async (req, res, next) => {
       console.error('Update mirror to mobile failed:', mirrorErr?.message || mirrorErr);
     }
     res.json({ success: true, data: updated });
-  } catch (err) { next(err); }
+  } catch (err) { 
+    console.error('Error in update method:', err);
+    next(err); 
+  }
 };
 
 // Delete plan
@@ -250,9 +313,13 @@ exports.remove = async (req, res, next) => {
     const { id } = req.params;
     const { unassign_only } = req.query; // Check if this is an unassign operation
     
+    console.log('Delete request received:', { id, unassign_only, user_id: req.user.id });
+    
     // Find plan to resolve link to mobile table
     const plan = await db('training_plans').where({ id, gym_id: req.user.gym_id }).first();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
+    
+    console.log('Plan found:', { id: plan.id, user_id: plan.user_id, assign_to: plan.assign_to });
 
     if (unassign_only === 'true') {
       // If this row is a clone (assigned plan with a user_id), DELETE it entirely
@@ -321,41 +388,6 @@ exports.updateStatus = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// Get training plans assigned to current trainer (My Assign feature)
-exports.getMyAssignments = async (req, res, next) => {
-  try {
-    const { page = 1, limit = 20, status, category } = req.query;
-    const trainerId = req.user.id; // Current trainer's ID
-    
-    const query = db('training_plans')
-      .where({ 
-        gym_id: req.user.gym_id,
-        assign_to: trainerId 
-      })
-      .orderBy('created_at', 'desc');
-
-    if (status) query.andWhere('status', status);
-    if (category) query.andWhere('category', category);
-
-    const rows = await query.limit(limit).offset((page - 1) * limit);
-    const [{ count }] = await db('training_plans')
-      .where({ 
-        gym_id: req.user.gym_id,
-        assign_to: trainerId 
-      })
-      .count('* as count');
-
-    res.json({ 
-      success: true, 
-      data: rows, 
-      pagination: { 
-        page: Number(page), 
-        limit: Number(limit), 
-        total: Number(count) 
-      } 
-    });
-  } catch (err) { next(err); }
-};
 
 // Assign an existing plan to a user; allowed for trainer or gym_admin
 exports.assign = async (req, res, next) => {
@@ -410,7 +442,7 @@ exports.assign = async (req, res, next) => {
           sets: plan.sets || 0,
           reps: plan.reps || 0,
           weight_kg: plan.weight_kg || 0,
-          exercises_details: plan.exercises_details || null,
+          exercises_details: plan.exercises_details || JSON.stringify([]),
         })
         .returning('*');
 
@@ -437,13 +469,13 @@ exports.assign = async (req, res, next) => {
               const rows = parsed.map((ex) => ({
                 plan_id: mobilePlan.id,
                 workout_name: ex.name || ex.workout_name,
-                exercise_plan_category: ex.exercise_plan_category || assignment.category || null,
+                exercise_plan_category: assignment.category || null,
                 exercise_types: ex.exercise_types ?? null,
                 sets: Number(ex.sets || 0),
                 reps: Number(ex.reps || 0),
                 weight_kg: Number(ex.weight_kg ?? ex.weight ?? 0),
                 minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
-                user_level: ex.user_level || assignment.user_level || 'Beginner',
+                user_level: assignment.user_level || 'Beginner',
               }));
               if (rows.length) await db('app_manual_training_plan_items').insert(rows);
             }
@@ -474,7 +506,7 @@ exports.assign = async (req, res, next) => {
         sets: plan.sets || 0,
         reps: plan.reps || 0,
         weight_kg: plan.weight_kg || 0,
-        exercises_details: plan.exercises_details || null,
+        exercises_details: plan.exercises_details || JSON.stringify([]),
       })
       .returning('*');
 
@@ -501,13 +533,13 @@ exports.assign = async (req, res, next) => {
             const rows = parsed.map((ex) => ({
               plan_id: mobilePlan.id,
               workout_name: ex.name || ex.workout_name,
-              exercise_plan_category: ex.exercise_plan_category || assignment.category || null,
+              exercise_plan_category: assignment.category || null,
               exercise_types: ex.exercise_types ?? null,
               sets: Number(ex.sets || 0),
               reps: Number(ex.reps || 0),
               weight_kg: Number(ex.weight_kg ?? ex.weight ?? 0),
               minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
-              user_level: ex.user_level || assignment.user_level || 'Beginner',
+              user_level: assignment.user_level || 'Beginner',
             }));
             if (rows.length) await db('app_manual_training_plan_items').insert(rows);
           }
@@ -579,6 +611,11 @@ exports.updateAssignment = async (req, res, next) => {
     const { id } = req.params;
     const updateData = req.body;
 
+    console.log('=== UPDATE ASSIGNMENT DEBUG ===');
+    console.log('Assignment ID:', id);
+    console.log('Raw update data received:', updateData);
+    console.log('User gym_id:', req.user.gym_id);
+
     // Check if assignment exists and belongs to this gym
     const assignment = await db('training_plan_assignments')
       .where({ id, gym_id: req.user.gym_id })
@@ -588,10 +625,84 @@ exports.updateAssignment = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Assignment not found' });
     }
 
+    // Filter out fields that don't exist in training_plan_assignments table
+    const allowedFields = [
+      'start_date', 'end_date', 'category', 'user_level', 'status',
+      'total_workouts', 'total_exercises', 'training_minutes', 'sets', 'reps', 'weight_kg',
+      'exercises_details'
+    ];
+    
+    const filteredUpdateData = {};
+    allowedFields.forEach(field => {
+      if (updateData[field] !== undefined) {
+        filteredUpdateData[field] = updateData[field];
+      }
+    });
+    
+    // Remove any fields that might be causing issues
+    delete filteredUpdateData.id; // Remove id field
+    delete filteredUpdateData.workout_name; // Remove workout_name field
+    delete filteredUpdateData.exercise_types; // Remove exercise_types field
+    delete filteredUpdateData.trainer_id; // Remove trainer_id field
+    delete filteredUpdateData.user_id; // Remove user_id field
+    delete filteredUpdateData.gym_id; // Remove gym_id field
+    delete filteredUpdateData.web_plan_id; // Remove web_plan_id field
+    delete filteredUpdateData.created_at; // Remove created_at field
+    delete filteredUpdateData.updated_at; // Remove updated_at field
+    
+    console.log('Fields being filtered:');
+    console.log('Allowed fields:', allowedFields);
+    console.log('Fields in updateData:', Object.keys(updateData));
+    console.log('Filtered update data:', filteredUpdateData);
+    
+    // Ensure numeric fields are properly converted (handle empty strings)
+    if (filteredUpdateData.total_workouts !== undefined) {
+      filteredUpdateData.total_workouts = filteredUpdateData.total_workouts === '' ? 0 : parseInt(filteredUpdateData.total_workouts) || 0;
+    }
+    if (filteredUpdateData.total_exercises !== undefined) {
+      filteredUpdateData.total_exercises = filteredUpdateData.total_exercises === '' ? 0 : parseInt(filteredUpdateData.total_exercises) || 0;
+    }
+    if (filteredUpdateData.training_minutes !== undefined) {
+      filteredUpdateData.training_minutes = filteredUpdateData.training_minutes === '' ? 0 : parseInt(filteredUpdateData.training_minutes) || 0;
+    }
+    if (filteredUpdateData.sets !== undefined) {
+      filteredUpdateData.sets = filteredUpdateData.sets === '' ? 0 : parseInt(filteredUpdateData.sets) || 0;
+    }
+    if (filteredUpdateData.reps !== undefined) {
+      filteredUpdateData.reps = filteredUpdateData.reps === '' ? 0 : parseInt(filteredUpdateData.reps) || 0;
+    }
+    if (filteredUpdateData.weight_kg !== undefined) {
+      filteredUpdateData.weight_kg = filteredUpdateData.weight_kg === '' ? '' : filteredUpdateData.weight_kg.toString();
+    }
+
+    // Final validation - ensure no empty strings in numeric fields
+    const numericFields = ['total_workouts', 'total_exercises', 'training_minutes', 'sets', 'reps'];
+    numericFields.forEach(field => {
+      if (filteredUpdateData[field] === '' || filteredUpdateData[field] === null || filteredUpdateData[field] === undefined) {
+        filteredUpdateData[field] = 0;
+      }
+    });
+
+    console.log('Final data being sent to database:', filteredUpdateData);
+    console.log('Data types check:');
+    console.log('- total_workouts:', typeof filteredUpdateData.total_workouts, filteredUpdateData.total_workouts);
+    console.log('- total_exercises:', typeof filteredUpdateData.total_exercises, filteredUpdateData.total_exercises);
+    console.log('- training_minutes:', typeof filteredUpdateData.training_minutes, filteredUpdateData.training_minutes);
+    console.log('- sets:', typeof filteredUpdateData.sets, filteredUpdateData.sets);
+    console.log('- reps:', typeof filteredUpdateData.reps, filteredUpdateData.reps);
+    console.log('- weight_kg:', typeof filteredUpdateData.weight_kg, filteredUpdateData.weight_kg);
+    
+    // Check for any remaining empty strings
+    Object.keys(filteredUpdateData).forEach(key => {
+      if (filteredUpdateData[key] === '') {
+        console.log(`WARNING: Empty string found in field: ${key}`);
+      }
+    });
+
     // Update assignment
     const [updated] = await db('training_plan_assignments')
       .where({ id, gym_id: req.user.gym_id })
-      .update(updateData)
+      .update(filteredUpdateData)
       .returning('*');
 
     // Mirror changes to mobile app
@@ -628,13 +739,13 @@ exports.updateAssignment = async (req, res, next) => {
               const rows = parsed.map((ex) => ({
                 plan_id: mobilePlan.id,
                 workout_name: ex.name || ex.workout_name,
-                exercise_plan_category: ex.exercise_plan_category || updated.category || null,
+                exercise_plan_category: updated.category || null,
                 exercise_types: ex.exercise_types ?? null,
                 sets: Number(ex.sets || 0),
                 reps: Number(ex.reps || 0),
                 weight_kg: Number(ex.weight_kg ?? ex.weight ?? 0),
                 minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
-                user_level: ex.user_level || updated.user_level || 'Beginner',
+                user_level: updated.user_level || 'Beginner',
               }));
               if (rows.length) await db('app_manual_training_plan_items').insert(rows);
             }

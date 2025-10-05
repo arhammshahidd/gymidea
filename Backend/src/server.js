@@ -56,8 +56,13 @@ io.use(async (socket, next) => {
 
 io.on('connection', (socket) => {
   const gymId = socket.user?.gym_id;
+  const userId = socket.user?.id;
   if (gymId) {
     socket.join(`gym:${gymId}`);
+  }
+  // Also join a user-specific room so mobile clients can receive targeted events
+  if (userId) {
+    socket.join(`user:${userId}`);
   }
 });
 

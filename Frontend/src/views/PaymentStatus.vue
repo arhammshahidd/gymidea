@@ -1,251 +1,361 @@
 <template>
   <div class="payment-status-page">
-    <!-- Header -->
-    <div class="page-header">
-      <div class="header-content">
-        <h1 class="page-title">Payment Status</h1>
-      </div>
-      <div class="header-actions">
-        <q-input
-          v-model="searchQuery"
-          placeholder="Search by ID, Name, Email, Phone..."
-          outlined
-          dense
-          clearable
-          @input="handleSearch"
-          class="search-input"
-        >
-          <template v-slot:prepend>
-            <q-icon name="search" />
-          </template>
-        </q-input>
-      </div>
-    </div>
+    <!-- Header Section -->
+    <q-card class="header-card q-mb-lg" elevated>
+      <q-card-section class="q-pa-lg">
+        <div class="row items-center justify-between">
+          <div class="header-content">
+            <div class="text-h4 text-weight-bold text-primary q-mb-xs">Payment Status</div>
+            <div class="text-subtitle1 text-grey-6">Track and manage member payments and subscriptions</div>
+          </div>
+          <div class="header-actions">
+            <q-input
+              v-model="searchQuery"
+              placeholder="Search by ID, Name, Email, Phone..."
+              outlined
+              clearable
+              @input="handleSearch"
+              class="search-input"
+            >
+              <template v-slot:prepend>
+                <q-icon name="search" color="primary" />
+              </template>
+            </q-input>
+          </div>
+        </div>
+      </q-card-section>
+    </q-card>
 
     <!-- Overview Cards -->
-    <div class="overview-section q-mb-lg">
-      <div class="row q-gutter-md">
+    <div class="overview-section q-mb-xl">
+      <div class="stats-grid">
         <!-- Total Users Card -->
-        <div class="col-6 col-sm-4 col-md-2 col-lg-2">
-          <q-card class="overview-card total-users">
-            <q-card-section class="text-center">
-              <q-avatar size="40px" color="primary" class="q-mb-sm">
-                <q-icon name="people" size="20px" color="white" />
-              </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ computedOverviewData.totalMembers || 0 }}</div>
-              <div class="text-caption text-grey-6">Total Users</div>
-            </q-card-section>
-          </q-card>
-        </div>
+        <q-card class="stat-card stat-card-primary" elevated>
+          <q-card-section class="q-pa-lg">
+            <div class="row items-center no-wrap">
+              <q-avatar 
+                color="primary" 
+                text-color="white" 
+                icon="people" 
+                size="48px"
+                class="q-mr-md"
+              />
+              <div class="stat-content">
+                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Total Users</div>
+                <div class="text-h4 text-weight-bold">{{ computedOverviewData.totalMembers || 0 }}</div>
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
 
         <!-- Active Users Card -->
-        <div class="col-6 col-sm-4 col-md-2 col-lg-2">
-          <q-card class="overview-card active-users">
-            <q-card-section class="text-center">
-              <q-avatar size="40px" color="positive" class="q-mb-sm">
-                <q-icon name="person_check" size="20px" color="white" />
-              </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ computedOverviewData.activeMembers || 0 }}</div>
-              <div class="text-caption text-grey-6">Active Users</div>
-            </q-card-section>
-          </q-card>
-        </div>
+        <q-card class="stat-card stat-card-success" elevated>
+          <q-card-section class="q-pa-lg">
+            <div class="row items-center no-wrap">
+              <q-avatar 
+                color="positive" 
+                text-color="white" 
+                icon="person_check" 
+                size="48px"
+                class="q-mr-md"
+              />
+              <div class="stat-content">
+                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Active Users</div>
+                <div class="text-h4 text-weight-bold">{{ computedOverviewData.activeMembers || 0 }}</div>
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
 
         <!-- Paid Users Card -->
-        <div class="col-6 col-sm-4 col-md-2 col-lg-2">
-          <q-card class="overview-card paid-users">
-            <q-card-section class="text-center">
-              <q-avatar size="40px" color="green" class="q-mb-sm">
-                <q-icon name="attach_money" size="20px" color="white" />
-              </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ computedOverviewData.paidMembers || 0 }}</div>
-              <div class="text-caption text-grey-6">Paid Users</div>
-            </q-card-section>
-          </q-card>
-        </div>
+        <q-card class="stat-card stat-card-paid" elevated>
+          <q-card-section class="q-pa-lg">
+            <div class="row items-center no-wrap">
+              <q-avatar 
+                color="green" 
+                text-color="white" 
+                icon="attach_money" 
+                size="48px"
+                class="q-mr-md"
+              />
+              <div class="stat-content">
+                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Paid Users</div>
+                <div class="text-h4 text-weight-bold">{{ computedOverviewData.paidMembers || 0 }}</div>
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
 
         <!-- Unpaid Users Card -->
-        <div class="col-6 col-sm-4 col-md-2 col-lg-2">
-          <q-card class="overview-card unpaid-users">
-            <q-card-section class="text-center">
-              <q-avatar size="40px" color="warning" class="q-mb-sm">
-                <q-icon name="money_off" size="20px" color="white" />
-              </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ computedOverviewData.unpaidMembers || 0 }}</div>
-              <div class="text-caption text-grey-6">Unpaid Users</div>
-            </q-card-section>
-          </q-card>
-        </div>
+        <q-card class="stat-card stat-card-warning" elevated>
+          <q-card-section class="q-pa-lg">
+            <div class="row items-center no-wrap">
+              <q-avatar 
+                color="warning" 
+                text-color="white" 
+                icon="money_off" 
+                size="48px"
+                class="q-mr-md"
+              />
+              <div class="stat-content">
+                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Unpaid Users</div>
+                <div class="text-h4 text-weight-bold">{{ computedOverviewData.unpaidMembers || 0 }}</div>
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
 
         <!-- Inactive Users Card -->
-        <div class="col-6 col-sm-4 col-md-2 col-lg-2">
-          <q-card class="overview-card inactive-users">
-            <q-card-section class="text-center">
-              <q-avatar size="40px" color="negative" class="q-mb-sm">
-                <q-icon name="person_off" size="20px" color="white" />
-              </q-avatar>
-              <div class="text-h6 text-weight-bold">{{ (computedOverviewData.totalMembers || 0) - (computedOverviewData.activeMembers || 0) }}</div>
-              <div class="text-caption text-grey-6">Inactive Users</div>
-            </q-card-section>
-          </q-card>
-        </div>
+        <q-card class="stat-card stat-card-danger" elevated>
+          <q-card-section class="q-pa-lg">
+            <div class="row items-center no-wrap">
+              <q-avatar 
+                color="negative" 
+                text-color="white" 
+                icon="person_off" 
+                size="48px"
+                class="q-mr-md"
+              />
+              <div class="stat-content">
+                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Inactive Users</div>
+                <div class="text-h4 text-weight-bold">{{ (computedOverviewData.totalMembers || 0) - (computedOverviewData.activeMembers || 0) }}</div>
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
 
         <!-- Total Amount Card -->
-        <div class="col-6 col-sm-4 col-md-2 col-lg-2">
-          <q-card class="overview-card  total-amount">
-            <q-card-section class="text-center">
-              <q-avatar size="40px" color="purple" class="q-mb-sm">
-                <q-icon name="account_balance_wallet" size="20px" color="white" />
-              </q-avatar>
-              <div class="text-h6 text-weight-bold">PKR{{ totalAmount || 0 }}</div>
-              <div class="text-caption text-grey-6">Total Amount</div>
-            </q-card-section>
-          </q-card>
-        </div>
+        <q-card class="stat-card stat-card-purple" elevated>
+          <q-card-section class="q-pa-lg">
+            <div class="row items-center no-wrap">
+              <q-avatar 
+                color="purple" 
+                text-color="white" 
+                icon="account_balance_wallet" 
+                size="48px"
+                class="q-mr-md"
+              />
+              <div class="stat-content">
+                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Total Amount</div>
+                <div class="text-h4 text-weight-bold">PKR{{ totalAmount || 0 }}</div>
+              </div>
+            </div>
+          </q-card-section>
+        </q-card>
       </div>
     </div>
 
-    <!-- Filters -->
-    <div class="filters-section q-mb-lg">
-      <div class="row q-gutter-md items-center">
-        <div class="col-12 col-sm-6 col-md-3">
-          <q-select
-            v-model="statusFilter"
-            :options="statusOptions"
-            placeholder="Filter by Status"
-            outlined
-            dense
-            clearable
-            @update:model-value="handleFilter"
-            class="filter-select"
-          />
+    <!-- Filters Section -->
+    <q-card class="filters-card q-mb-lg" elevated>
+      <q-card-section class="q-pa-lg">
+        <div class="row q-col-gutter-lg items-center">
+          <div class="col-12 col-md-4">
+            <div class="text-h6 text-weight-bold text-primary q-mb-sm">Filters & Actions</div>
+            <div class="text-caption text-grey-6">Filter users by status and payment status</div>
+          </div>
+          <div class="col-12 col-md-3">
+            <q-select
+              v-model="statusFilter"
+              :options="statusOptions"
+              placeholder="Filter by Status"
+              outlined
+              clearable
+              @update:model-value="handleFilter"
+              class="filter-select"
+              emit-value
+              map-options
+            >
+              <template v-slot:prepend>
+                <q-icon name="filter_list" color="primary" />
+              </template>
+            </q-select>
+          </div>
+          <div class="col-12 col-md-3">
+            <q-select
+              v-model="paymentFilter"
+              :options="paymentOptions"
+              placeholder="Filter by Payment"
+              outlined
+              clearable
+              @update:model-value="handlePaymentFilter"
+              class="filter-select"
+              emit-value
+              map-options
+            >
+              <template v-slot:prepend>
+                <q-icon name="payment" color="primary" />
+              </template>
+            </q-select>
+          </div>
+          <div class="col-12 col-md-2">
+            <q-btn 
+              @click="refreshData" 
+              color="primary" 
+              icon="refresh" 
+              label="Refresh Data" 
+              unelevated
+              :loading="loading"
+              class="full-width"
+              size="md"
+            />
+          </div>
         </div>
-        <div class="col-12 col-sm-6 col-md-3">
-          <q-select
-            v-model="paymentFilter"
-            :options="paymentOptions"
-            placeholder="Filter by Payment"
-            outlined
-            dense
-            clearable
-            @update:model-value="handlePaymentFilter"
-            class="filter-select"
-          />
-        </div>
-        <div class="col-12 col-sm-12 col-md-3">
-          <q-btn 
-            @click="refreshData" 
-            color="primary" 
-            icon="refresh" 
-            label="Refresh Data" 
-            unelevated
-            :loading="loading"
-            class="full-width"
-            size="md"
-          />
-        </div>
-        
-      </div>
-    </div>
+      </q-card-section>
+    </q-card>
 
-    <!-- User Cards -->
+    <!-- User Cards Section -->
     <div class="user-cards-section">
-      <div v-if="loading" class="text-center q-pa-lg">
-        <q-spinner-dots size="50px" color="primary" />
-        <p>Loading payment records...</p>
-      </div>
-      <div v-else-if="!filteredUserCards || filteredUserCards.length === 0" class="text-center q-pa-lg">
-        <q-icon name="inbox" size="64px" color="grey-5" />
-        <p>No payment records found.</p>
-        <p class="text-caption">Debug: filteredUserCards length = {{ filteredUserCards?.length || 0 }}</p>
-        <p class="text-caption">Debug: userCards length = {{ userCards?.length || 0 }}</p>
-      </div>
+      <!-- Loading State -->
+      <q-card v-if="loading" class="loading-card q-mb-lg" elevated>
+        <q-card-section class="text-center q-pa-xl">
+          <q-spinner-dots size="50px" color="primary" class="q-mb-md" />
+          <div class="text-h6 text-grey-7">Loading payment records...</div>
+        </q-card-section>
+      </q-card>
+
+      <!-- Empty State -->
+      <q-card v-else-if="!filteredUserCards || filteredUserCards.length === 0" class="empty-state-card q-mb-lg" elevated>
+        <q-card-section class="text-center q-pa-xl">
+          <q-icon name="inbox" size="64px" color="grey-5" class="q-mb-md" />
+          <div class="text-h6 text-grey-7 q-mb-sm">No payment records found</div>
+          <div class="text-body2 text-grey-6">Try adjusting your filters or refresh the data</div>
+        </q-card-section>
+      </q-card>
+
+      <!-- User Cards Grid -->
       <div v-else>
-        <!-- Debug Info -->
-        <div class="q-mb-md text-caption text-grey-6">
-          Showing Users {{ filteredUserCards.length }}
+        <!-- Results Header -->
+        <div class="results-header q-mb-lg">
+          <div class="text-h6 text-weight-bold text-primary">Payment Records</div>
+          <div class="text-caption text-grey-6">Showing {{ filteredUserCards.length }} user(s)</div>
         </div>
         
-        <!-- Responsive Grid Layout -->
-        <div class="row q-gutter-md">
+        <!-- User Cards Grid -->
+        <div class="user-cards-grid">
           <template v-for="(card, index) in filteredUserCards" :key="card?.id || index">
             <div 
               v-if="card && card.id"
-              class="col-12 col-sm-6 col-md-6 col-lg-4"
+              class="user-card-wrapper"
             >
-              <q-card class="user-card full-height">
+              <q-card class="user-card" elevated>
+                <!-- Card Header -->
                 <q-card-section class="user-card-header">
-                  <div class="text-h6 text-primary">#{{ card.id || 'N/A' }}</div>
-                  <div class="text-subtitle1 text-weight-medium">{{ card.name || 'N/A' }}</div>
-                  <div class="text-caption text-grey-6">Email: {{ card.email || 'N/A' }}</div>
-                  <div class="text-caption text-grey-6">Contact: {{ card.phone || 'N/A' }}</div>
-                  
+                  <div class="row items-center q-mb-sm">
+                    <q-avatar size="40px" color="primary" text-color="white" class="q-mr-md">
+                      {{ card.name ? card.name.charAt(0).toUpperCase() : 'U' }}
+                    </q-avatar>
+                    <div>
+                      <div class="text-h6 text-primary text-weight-bold">#{{ card.id || 'N/A' }}</div>
+                      <div class="text-subtitle1 text-weight-medium">{{ card.name || 'N/A' }}</div>
+                    </div>
+                  </div>
+                  <div class="contact-info">
+                    <div class="text-caption text-grey-6 q-mb-xs">
+                      <q-icon name="email" size="14px" class="q-mr-xs" />
+                      {{ card.email || 'N/A' }}
+                    </div>
+                    <div class="text-caption text-grey-6">
+                      <q-icon name="phone" size="14px" class="q-mr-xs" />
+                      {{ card.phone || 'N/A' }}
+                    </div>
+                  </div>
                 </q-card-section>
                 
+                <!-- Card Body -->
                 <q-card-section class="user-card-body">
-                  <div class="row items-center q-mb-sm">
-                    <span class="text-h6 text-weight-bold">Total Received: PKR{{ card.totalAmount || 0 }}</span>
+                  <!-- Total Amount -->
+                  <div class="amount-section q-mb-md">
+                    <div class="text-caption text-grey-6 q-mb-xs">Total Received</div>
+                    <div class="text-h5 text-weight-bold text-primary">PKR{{ card.totalAmount || 0 }}</div>
                   </div>
                   
                   <!-- Last Payment Information -->
-                  <div v-if="card.lastPayment" class="q-mb-sm">
-                    <div class="text-caption text-grey-6">Last Payment:</div>
-                    <div class="row items-center">
-                      <q-icon name="payment" size="16px" color="blue" class="q-mr-xs" />
+                  <div v-if="card.lastPayment" class="payment-info q-mb-md">
+                    <div class="text-caption text-grey-6 q-mb-xs">Last Payment</div>
+                    <div class="row items-center q-mb-xs">
+                      <q-icon name="payment" size="16px" color="green" class="q-mr-xs" />
                       <span class="text-subtitle2 text-weight-medium">PKR{{ card.lastPaymentAmount || 0 }}/month</span>
                     </div>
-                    <div class="text-caption" :class="isOverdue(card.lastPaymentDueDate) ? 'text-red-6' : 'text-grey-6'">
+                    <div class="text-caption" :class="isOverdue(card.lastPaymentDueDate) ? 'text-negative' : 'text-grey-6'">
+                      <q-icon name="schedule" size="14px" class="q-mr-xs" />
                       Due: {{ formatDate(card.lastPaymentDueDate) }}
                     </div>
                   </div>
                   
-                  <div class="row q-gutter-xs">
-                    <q-badge 
-                      :color="(card.status || '').toLowerCase() === 'active' ? 'positive' : 'negative'"
-                      :label="card.status || 'Unknown'"
-                      class="col-auto"
-                    />
-                    <q-badge 
-                      :color="card.paymentStatus === 'Paid' ? 'positive' : 'warning'"
-                      :label="card.paymentStatus || 'Unpaid'"
-                      class="col-auto"
-                    />
-                    
-                    <q-badge 
-                      :color="card.membership_tier === 'PREMIUM' ? 'green' : 'blue-grey'"
-                      :label="card.membership_tier || 'BASIC'"
-                      class="membership-badge"
-                    />
-                  
+                  <!-- Status Badges -->
+                  <div class="badges-section">
+                    <div class="row q-gutter-xs">
+                      <q-badge 
+                        :color="(card.status || '').toLowerCase() === 'active' ? 'positive' : 'negative'"
+                        :label="card.status || 'Unknown'"
+                        class="status-badge"
+                      >
+                        <q-icon 
+                          :name="(card.status || '').toLowerCase() === 'active' ? 'check_circle' : 'cancel'"
+                          class="q-mr-xs"
+                        />
+                      </q-badge>
+                      <q-badge 
+                        :color="card.paymentStatus === 'Paid' ? 'positive' : 'warning'"
+                        :label="card.paymentStatus || 'Unpaid'"
+                        class="payment-badge"
+                      >
+                        <q-icon 
+                          :name="card.paymentStatus === 'Paid' ? 'attach_money' : 'money_off'"
+                          class="q-mr-xs"
+                        />
+                      </q-badge>
+                      <q-badge 
+                        :color="card.membership_tier === 'PREMIUM' ? 'amber' : 'blue-grey'"
+                        :label="card.membership_tier || 'BASIC'"
+                        class="membership-badge"
+                        outline
+                      >
+                        <q-icon 
+                          :name="card.membership_tier === 'PREMIUM' ? 'star' : 'person'"
+                          class="q-mr-xs"
+                        />
+                      </q-badge>
+                    </div>
                   </div>
                 </q-card-section>
                 
+                <!-- Card Actions -->
                 <q-card-actions class="user-card-actions">
                   <q-btn 
                     @click="openPaymentHistoryDialog(card)"
-                    color="blue" 
+                    color="primary" 
                     label="History"
                     icon="history"
                     size="sm"
-                    class="col"
-                  />
+                    class="action-btn"
+                    flat
+                  >
+                    <q-tooltip>View Payment History</q-tooltip>
+                  </q-btn>
                   <q-btn 
                     @click="sendIndividualReminder(card)"
                     color="green" 
                     label="WhatsApp"
                     icon="message"
                     size="sm"
-                    class="col"
+                    class="action-btn"
+                    flat
                     :disable="card.paymentStatus === 'Paid'"
-                  />
+                  >
+                    <q-tooltip>Send WhatsApp Reminder</q-tooltip>
+                  </q-btn>
                   <q-btn 
                     @click="openAddPaymentDialog(card)"
-                    color="light-green" 
+                    color="positive" 
                     icon="add"
                     label="Add"
                     size="sm"
-                    class="col"
-                  />
+                    class="action-btn"
+                    flat
+                  >
+                    <q-tooltip>Add New Payment</q-tooltip>
+                  </q-btn>
                 </q-card-actions>
               </q-card>
             </div>
@@ -1652,6 +1762,64 @@ onMounted(async () => {
   .payment-dialog {
     min-width: 90vw;
   }
+  
+  .overview-section .row {
+    margin: 0 -8px;
+  }
+  
+  .overview-section .col-6 {
+    padding: 0 8px;
+    margin-bottom: 16px;
+  }
+  
+  .overview-card {
+    min-height: 100px;
+  }
+  
+  .overview-card .text-h6 {
+    font-size: 1.2rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .payment-status-page {
+    padding: 12px;
+  }
+  
+  .page-title {
+    font-size: 1.5rem;
+  }
+  
+  .overview-section .col-6 {
+    flex: 0 0 50%;
+    max-width: 50%;
+  }
+  
+  .overview-card {
+    min-height: 80px;
+  }
+  
+  .overview-card .text-h6 {
+    font-size: 1rem;
+  }
+  
+  .overview-card .text-caption {
+    font-size: 0.7rem;
+  }
+  
+  .user-card {
+    padding: 12px;
+  }
+  
+  .user-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .user-card-actions {
+    width: 100%;
+  }
 }
 
 .membership-badge {
@@ -1659,5 +1827,361 @@ onMounted(async () => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* Enhanced Modern Styling */
+.payment-status-page {
+  background: #f8f9fa;
+  min-height: 100vh;
+}
+
+/* Header Card Styling */
+.header-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+}
+
+.header-card .q-card-section {
+  background: transparent;
+}
+
+.header-content .text-h4 {
+  color: white !important;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.header-content .text-subtitle1 {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.search-input .q-field__control {
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+}
+
+.search-input .q-field__control:hover {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.search-input .q-field--focused .q-field__control {
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2);
+}
+
+.search-input .q-field__native {
+  color: white;
+}
+
+.search-input .q-field__native::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Statistics Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.stat-card {
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--accent-color, #667eea), var(--accent-color-light, #764ba2));
+}
+
+.stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+.stat-card-primary {
+  --accent-color: #667eea;
+  --accent-color-light: #764ba2;
+}
+
+.stat-card-success {
+  --accent-color: #4caf50;
+  --accent-color-light: #8bc34a;
+}
+
+.stat-card-paid {
+  --accent-color: #4caf50;
+  --accent-color-light: #66bb6a;
+}
+
+.stat-card-warning {
+  --accent-color: #ff9800;
+  --accent-color-light: #ffc107;
+}
+
+.stat-card-danger {
+  --accent-color: #f44336;
+  --accent-color-light: #ff7043;
+}
+
+.stat-card-purple {
+  --accent-color: #9c27b0;
+  --accent-color-light: #ba68c8;
+}
+
+.stat-content .text-caption {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.stat-content .text-h4 {
+  margin-top: 8px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent-color), var(--accent-color-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Filters Card */
+.filters-card {
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.filter-select .q-field__control {
+  border-radius: 12px;
+  border: 2px solid #e0e0e0;
+  transition: all 0.3s ease;
+}
+
+.filter-select .q-field__control:hover {
+  border-color: #667eea;
+}
+
+.filter-select .q-field--focused .q-field__control {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+/* Enhanced User Cards */
+.user-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 24px;
+}
+
+.user-card {
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  overflow: hidden;
+  position: relative;
+}
+
+.user-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+}
+
+.user-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
+.user-card-header {
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-bottom: 1px solid #e0e0e0;
+  padding: 24px;
+}
+
+.user-card-header .q-avatar {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.contact-info {
+  margin-top: 12px;
+}
+
+.user-card-body {
+  padding: 24px;
+}
+
+.amount-section {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+}
+
+.payment-info {
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.1) 0%, rgba(139, 195, 74, 0.1) 100%);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.badges-section {
+  margin-top: 16px;
+}
+
+.status-badge, .payment-badge, .membership-badge {
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.membership-badge {
+  border-width: 2px;
+}
+
+.user-card-actions {
+  padding: 20px 24px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-top: 1px solid #e0e0e0;
+  gap: 12px;
+}
+
+.action-btn {
+  border-radius: 10px;
+  font-weight: 600;
+  text-transform: none;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Loading and Empty States */
+.loading-card, .empty-state-card {
+  border-radius: 16px;
+  border: 2px dashed #e0e0e0;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+}
+
+.empty-state-card .q-icon {
+  opacity: 0.6;
+}
+
+.results-header {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+/* Enhanced Responsive Design */
+@media (max-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+  }
+  
+  .user-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .payment-status-page {
+    padding: 16px;
+  }
+  
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  
+  .user-cards-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  
+  .header-card .q-card-section {
+    padding: 20px;
+  }
+  
+  .filters-card .q-card-section {
+    padding: 20px;
+  }
+  
+  .user-card-header,
+  .user-card-body {
+    padding: 20px;
+  }
+  
+  .user-card-actions {
+    padding: 16px 20px;
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .action-btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .payment-status-page {
+    padding: 12px;
+  }
+  
+  .stats-grid {
+    gap: 12px;
+  }
+  
+  .user-cards-grid {
+    gap: 12px;
+  }
+  
+  .header-card .q-card-section {
+    padding: 16px;
+  }
+  
+  .filters-card .q-card-section {
+    padding: 16px;
+  }
+  
+  .user-card-header,
+  .user-card-body {
+    padding: 16px;
+  }
+  
+  .user-card-actions {
+    padding: 12px 16px;
+  }
+  
+  .amount-section,
+  .payment-info {
+    padding: 12px;
+  }
 }
 </style>

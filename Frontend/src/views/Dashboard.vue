@@ -8,182 +8,226 @@
       </div>
     </div>
 
-    <!-- KPI Cards -->
+    <!-- KPI Cards Grid -->
     <div class="kpi-section">
-      <div class="row q-gutter-lg">
-        <div class="col-12 col-lg-7">
-          <div class="row q-gutter-lg">
+      <div class="kpi-grid">
         <!-- Total Users -->
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-          <q-card class="kpi-card">
-            <div class="kpi-content">
-              <div class="kpi-info">
-                <div class="kpi-label">Total Users</div>
-                <div class="kpi-value">{{ userManagementStore.stats.totalUsers || 0 }}</div>
-              </div>
-              
+        <q-card class="kpi-card">
+          <div class="kpi-content">
+            <div class="kpi-icon">
+              <q-icon name="people" size="24px" :style="{ color: '#DF8A35' }" />
             </div>
-          </q-card>
-        </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Total Users</div>
+              <div class="kpi-value">{{ userManagementStore.stats.totalUsers || 0 }}</div>
+            </div>
+          </div>
+        </q-card>
 
         <!-- Total Payment -->
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-          <q-card class="kpi-card">
-            <div class="kpi-content">
-              <div class="kpi-info">
-                <div class="kpi-label">Total Payment</div>
-                <div class="kpi-value">PKR{{ paymentStatusStore.overview.total_amount || 0 }}</div>
-              </div>
-              
+        <q-card class="kpi-card">
+          <div class="kpi-content">
+            <div class="kpi-icon">
+              <q-icon name="account_balance_wallet" size="24px" :style="{ color: '#DF8A35' }" />
             </div>
-          </q-card>
-        </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Total Payment</div>
+              <div class="kpi-value">PKR{{ paymentStatusStore.overview.total_amount || 0 }}</div>
+            </div>
+          </div>
+        </q-card>
 
         <!-- Paid Users -->
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-          <q-card class="kpi-card">
-            <div class="kpi-content">
-              <div class="kpi-info">
-                <div class="kpi-label">Paid Users</div>
-                <div class="kpi-value">{{ paidUsersCard }}</div>
-              </div>
-              
+        <q-card class="kpi-card">
+          <div class="kpi-content">
+            <div class="kpi-icon">
+              <q-icon name="check_circle" size="24px" :style="{ color: '#DF8A35' }" />
             </div>
-          </q-card>
-        </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Paid Users</div>
+              <div class="kpi-value">{{ paidUsersCard }}</div>
+            </div>
+          </div>
+        </q-card>
 
         <!-- Unpaid Users -->
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-          <q-card class="kpi-card">
-            <div class="kpi-content">
-              <div class="kpi-info">
-                <div class="kpi-label">Unpaid Users</div>
-                <div class="kpi-value">{{ unpaidUsersCard }}</div>
-              </div>
-             
+        <q-card class="kpi-card">
+          <div class="kpi-content">
+            <div class="kpi-icon">
+              <q-icon name="pending" size="24px" :style="{ color: '#DF8A35' }" />
             </div>
-          </q-card>
-        </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Unpaid Users</div>
+              <div class="kpi-value">{{ unpaidUsersCard }}</div>
+            </div>
+          </div>
+        </q-card>
 
         <!-- Active Users -->
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-          <q-card class="kpi-card">
-            <div class="kpi-content">
-              <div class="kpi-info">
-                <div class="kpi-label">Active Users</div>
-                <div class="kpi-value">{{ userManagementStore.stats.totalActiveUsers || 0 }}</div>
-              </div>
-              
+        <q-card class="kpi-card">
+          <div class="kpi-content">
+            <div class="kpi-icon">
+              <q-icon name="people" size="24px" :style="{ color: '#DF8A35' }" />
             </div>
-          </q-card>
-        </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Active Users</div>
+              <div class="kpi-value">{{ userManagementStore.stats.totalActiveUsers || 0 }}</div>
+            </div>
+          </div>
+        </q-card>
 
         <!-- Inactive Users -->
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-          <q-card class="kpi-card">
-            <div class="kpi-content">
-              <div class="kpi-info">
-                <div class="kpi-label">Inactive Users</div>
-                <div class="kpi-value">{{ userManagementStore.stats.totalInactiveUsers || 0 }}</div>
-              </div>
-              
+        <q-card class="kpi-card">
+          <div class="kpi-content">
+            <div class="kpi-icon">
+              <q-icon name="person_off" size="24px" :style="{ color: '#DF8A35' }" />
             </div>
-          </q-card>
-        </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Inactive Users</div>
+              <div class="kpi-value">{{ userManagementStore.stats.totalInactiveUsers || 0 }}</div>
+            </div>
+          </div>
+        </q-card>
 
         <!-- Basic Memberships -->
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-          <q-card class="kpi-card">
-            <div class="kpi-content">
-              <div class="kpi-info">
-                <div class="kpi-label">Basic Memberships</div>
-                <div class="kpi-value">{{ userManagementStore.stats.totalBasicMemberships || 0 }}</div>
-              </div>
-              
+        <q-card class="kpi-card">
+          <div class="kpi-content">
+            <div class="kpi-icon">
+              <q-icon name="star_border" size="24px" :style="{ color: '#DF8A35' }" />
             </div>
-          </q-card>
-        </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Basic Memberships</div>
+              <div class="kpi-value">{{ userManagementStore.stats.totalBasicMemberships || 0 }}</div>
+            </div>
+          </div>
+        </q-card>
 
         <!-- Premium Memberships -->
-        <div class="col-12 col-sm-6 col-md-4 col-lg-3">
-          <q-card class="kpi-card">
-            <div class="kpi-content">
-              <div class="kpi-info">
-                <div class="kpi-label">Premium Memberships</div>
-                <div class="kpi-value">{{ userManagementStore.stats.totalPremiumMemberships || 0 }}</div>
-              </div>
-             
+        <q-card class="kpi-card">
+          <div class="kpi-content">
+            <div class="kpi-icon">
+              <q-icon name="star" size="24px" :style="{ color: '#DF8A35' }" />
             </div>
-          </q-card>
-        </div>
+            <div class="kpi-info">
+              <div class="kpi-label">Premium Memberships</div>
+              <div class="kpi-value">{{ userManagementStore.stats.totalPremiumMemberships || 0 }}</div>
+            </div>
           </div>
-        </div>
-        <div class="col-12 col-lg-4">
-          <q-card class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">Membership Tiers</h3>
-            </div>
-            <div class="donut-chart">
-              <div class="donut-ring" :style="donutStyle"></div>
-              <div class="donut-center">
-                <span class="donut-total">{{ totalMembersForDonut }}</span>
-                <span class="donut-label">Total</span>
-              </div>
-            </div>
-            <div class="chart-legend">
-              <div class="legend-item">
-                <div class="legend-color basic"></div>
-                <span>Basic ({{ totalBasic }})</span>
-              </div>
-              <div class="legend-item">
-                <div class="legend-color premium"></div>
-                <span>Premium ({{ totalPremium }})</span>
-              </div>
-            </div>
-          </q-card>
-        </div>
+        </q-card>
       </div>
     </div>
 
     <!-- Charts Section -->
-    <div class="charts-section ">
-      <div class="row q-gutter-lg">
-        <!-- User Growth Chart -->
-        <div class="col-12 col-md-12">
-          <q-card class="chart-card">
-            <div class="chart-header">
-              <h3 class="chart-title">User Growth</h3>
-            </div>
-            <div class="chart-container">
-              <svg class="svg-chart" :viewBox="`0 0 ${chartWidth} ${chartHeight}`" preserveAspectRatio="none">
-                <g :transform="`translate(${margin.left}, ${margin.top})`">
-                  <g class="y-grid">
-                    <line v-for="(y, idx) in yGridLines" :key="`yg${idx}`" :x1="0" :x2="innerWidth" :y1="y" :y2="y" />
-                  </g>
-                  <g class="x-grid">
-                    <line v-for="(x, idx) in xGridLines" :key="`xg${idx}`" :x1="x" :x2="x" :y1="0" :y2="innerHeight" />
-                  </g>
-                  <path class="area" :d="areaPath" />
-                  <g class="lines">
-                    <line v-for="(s, i) in lineSegments" :key="`seg${i}`"
-                      :x1="s.x1" :y1="s.y1" :x2="s.x2" :y2="s.y2"
-                      :stroke="s.color" stroke-width="2" fill="none" />
-                  </g>
-                  <g class="x-axis">
-                    <text v-for="(label, i) in growthLabels" :key="`xl${i}`" :x="xPosition(i)" :y="innerHeight + 18" text-anchor="middle">{{ label }}</text>
-                  </g>
-                  <g class="y-axis">
-                    <text v-for="(tick, i) in yTicks" :key="`yl${i}`" :x="-8" :y="yPosition(tick) + 4" text-anchor="end">{{ tick }}</text>
-                  </g>
-                </g>
-              </svg>
-              
-            </div>
-          </q-card>
+    <div class="charts-section">
+      <!-- Membership Tiers Chart -->
+      <q-card class="chart-card membership-chart">
+        <div class="chart-header">
+          <h3 class="chart-title">Membership Tiers</h3>
         </div>
+        <div class="donut-chart">
+          <div class="donut-ring" :style="donutStyle"></div>
+          <div class="donut-center">
+            <span class="donut-total">{{ totalMembersForDonut }}</span>
+            <span class="donut-label">Total</span>
+          </div>
+        </div>
+        <div class="chart-legend">
+          <div class="legend-item">
+            <div class="legend-color basic"></div>
+            <span>Basic ({{ totalBasic }})</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color premium"></div>
+            <span>Premium ({{ totalPremium }})</span>
+          </div>
+        </div>
+      </q-card>
 
-        
-      </div>
+      <!-- User Growth Chart -->
+      <q-card class="chart-card growth-chart">
+        <div class="chart-header">
+          <h3 class="chart-title">User Growth Trend</h3>
+          <div class="chart-subtitle">Monthly user registration overview</div>
+        </div>
+        <div class="chart-container">
+          <div class="growth-chart-wrapper">
+            <svg class="svg-chart" :viewBox="`0 0 ${chartWidth} ${chartHeight}`" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" style="stop-color:#4CAF50;stop-opacity:0.3" />
+                  <stop offset="100%" style="stop-color:#4CAF50;stop-opacity:0.05" />
+                </linearGradient>
+                <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" style="stop-color:#2E7D32" />
+                  <stop offset="50%" style="stop-color:#4CAF50" />
+                  <stop offset="100%" style="stop-color:#66BB6A" />
+                </linearGradient>
+              </defs>
+              <g :transform="`translate(${margin.left}, ${margin.top})`">
+                <!-- Grid lines -->
+                <g class="y-grid">
+                  <line v-for="(y, idx) in yGridLines" :key="`yg${idx}`" 
+                        :x1="0" :x2="innerWidth" :y1="y" :y2="y" 
+                        stroke="#E0E0E0" stroke-width="1" opacity="0.5" />
+                </g>
+                <g class="x-grid">
+                  <line v-for="(x, idx) in xGridLines" :key="`xg${idx}`" 
+                        :x1="x" :x2="x" :y1="0" :y2="innerHeight" 
+                        stroke="#E0E0E0" stroke-width="1" opacity="0.3" />
+                </g>
+                
+                <!-- Area fill -->
+                <path class="area" :d="areaPath" fill="url(#areaGradient)" />
+                
+                <!-- Main line -->
+                <g class="lines">
+                  <line v-for="(s, i) in lineSegments" :key="`seg${i}`"
+                        :x1="s.x1" :y1="s.y1" :x2="s.x2" :y2="s.y2"
+                        stroke="url(#lineGradient)" stroke-width="3" fill="none" 
+                        stroke-linecap="round" stroke-linejoin="round" />
+                </g>
+                
+                <!-- Data points -->
+                <g class="data-points">
+                  <circle v-for="(point, i) in svgPoints" :key="`point${i}`"
+                          :cx="point.x" :cy="point.y" r="4" 
+                          fill="#4CAF50" stroke="#ffffff" stroke-width="2" />
+                </g>
+                
+                <!-- X-axis labels -->
+                <g class="x-axis">
+                  <text v-for="(label, i) in growthLabels" :key="`xl${i}`" 
+                        :x="xPosition(i)" :y="innerHeight + 20" 
+                        text-anchor="middle" fill="#666" font-size="12" font-weight="500">{{ label }}</text>
+                </g>
+                
+                <!-- Y-axis labels -->
+                <g class="y-axis">
+                  <text v-for="(tick, i) in yTicks" :key="`yl${i}`" 
+                        :x="-12" :y="yPosition(tick) + 4" 
+                        text-anchor="end" fill="#666" font-size="12" font-weight="500">{{ tick }}</text>
+                </g>
+              </g>
+            </svg>
+          </div>
+          
+          <!-- Growth summary -->
+          <div class="growth-summary">
+            <div class="summary-item">
+              <div class="summary-label">Total Growth</div>
+              <div class="summary-value positive">+{{ totalGrowth }} users</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">Peak Month</div>
+              <div class="summary-value">{{ peakMonth }}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">Average</div>
+              <div class="summary-value">{{ averageGrowth }} users/month</div>
+            </div>
+          </div>
+        </div>
+      </q-card>
     </div>
   </div>
 </template>
@@ -394,6 +438,24 @@ const toNumber = (val) => {
 }
 const paidUsersCard = computed(() => toNumber(paidUsersCount.value))
 const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
+
+// Growth summary calculations
+const totalGrowth = computed(() => {
+  const total = growthData.value.reduce((sum, val) => sum + val, 0)
+  return total
+})
+
+const peakMonth = computed(() => {
+  const maxValue = Math.max(...growthData.value)
+  const maxIndex = growthData.value.indexOf(maxValue)
+  return growthLabels.value[maxIndex] || 'N/A'
+})
+
+const averageGrowth = computed(() => {
+  const total = totalGrowth.value
+  const months = growthData.value.length
+  return months > 0 ? Math.round(total / months) : 0
+})
 </script>
 
 <style scoped>
@@ -404,6 +466,157 @@ const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+  .charts-section {
+    gap: 20px;
+  }
+  
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 16px;
+  }
+  
+  .chart-container {
+    width: 100%;
+  }
+  
+  .donut-chart {
+    max-width: 250px;
+    height: 250px;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-page {
+    padding: 16px;
+  }
+  
+  .dashboard-title {
+    font-size: 24px !important;
+  }
+  
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  
+  .kpi-content {
+    padding: 16px !important;
+    gap: 12px;
+  }
+  
+  .kpi-icon {
+    width: 40px !important;
+    height: 40px !important;
+  }
+  
+  .kpi-value {
+    font-size: 24px !important;
+  }
+  
+  .chart-container {
+    height: 250px !important;
+    padding: 0 16px 16px 16px !important;
+    width: 100% !important;
+  }
+  
+  .growth-chart-wrapper {
+    height: 160px !important;
+    width: 100% !important;
+  }
+  
+  .donut-chart {
+    max-width: 200px !important;
+    height: 200px !important;
+  }
+  
+  .chart-legend {
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+  }
+  
+  .donut-total {
+    font-size: 18px !important;
+  }
+  
+  .growth-summary {
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+  }
+  
+  .summary-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-page {
+    padding: 12px;
+  }
+  
+  .dashboard-title {
+    font-size: 20px !important;
+  }
+  
+  .kpi-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .kpi-content {
+    padding: 12px !important;
+    gap: 10px;
+  }
+  
+  .kpi-icon {
+    width: 36px !important;
+    height: 36px !important;
+  }
+  
+  .kpi-value {
+    font-size: 20px !important;
+  }
+  
+  .chart-container {
+    height: 220px !important;
+    padding: 0 12px 12px 12px !important;
+    width: 100% !important;
+  }
+  
+  .growth-chart-wrapper {
+    height: 140px !important;
+    width: 100% !important;
+  }
+  
+  .donut-chart {
+    max-width: 150px !important;
+    height: 150px !important;
+  }
+  
+  .chart-legend {
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+  }
+  
+  .donut-total {
+    font-size: 16px !important;
+  }
+  
+  .chart-title {
+    font-size: 16px !important;
+  }
+  
+  .chart-subtitle {
+    font-size: 12px !important;
+  }
 }
 
 .dashboard-header {
@@ -434,25 +647,55 @@ const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
   margin-bottom: 32px;
 }
 
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-bottom: 32px;
+}
+
 .kpi-card {
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   border: 1px solid #e9ecef;
   transition: all 0.3s ease;
   overflow: hidden;
+  position: relative;
 }
 
 .kpi-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: #DF8A35 !important;
+  border-radius: 16px 16px 0 0;
 }
 
 .kpi-content {
   padding: 24px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 16px;
+}
+
+.kpi-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(76, 175, 80, 0.1);
+  flex-shrink: 0;
 }
 
 .kpi-info {
@@ -460,20 +703,20 @@ const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
 }
 
 .kpi-label {
-  font-size: 12px;
-  color: #27ae60;
+  font-size: 13px;
+  color: #6c757d;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 .kpi-value {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   color: #2c3e50;
-  margin-bottom: 8px;
-  line-height: 1.2;
+  line-height: 1.1;
+  margin: 0;
 }
 
 .kpi-change {
@@ -492,14 +735,22 @@ const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
 
 .charts-section {
   margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 .chart-card {
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   border: 1px solid #e9ecef;
   overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.chart-card:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 .chart-header {
@@ -508,16 +759,67 @@ const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
 }
 
 .chart-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: #2c3e50;
+  margin: 0 0 4px 0;
+}
+
+.chart-subtitle {
+  font-size: 14px;
+  color: #6c757d;
   margin: 0;
+  font-weight: 500;
 }
 
 .chart-container {
-  height: 250px;
+  height: 300px;
   position: relative;
   padding: 0 24px 24px 24px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.growth-chart-wrapper {
+  height: 200px;
+  margin-bottom: 20px;
+  width: 100%;
+  flex: 1;
+}
+
+.growth-summary {
+  display: flex;
+  justify-content: space-around;
+  padding: 16px 0;
+  border-top: 1px solid #e9ecef;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-top: 16px;
+}
+
+.summary-item {
+  text-align: center;
+  flex: 1;
+}
+
+.summary-label {
+  font-size: 12px;
+  color: #6c757d;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.summary-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #2c3e50;
+}
+
+.summary-value.positive {
+  color: #4CAF50;
 }
 
 .line-chart {
@@ -566,9 +868,13 @@ const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
 
 .donut-chart {
   position: relative;
-  width: 200px;
-  height: 200px;
+  width: 100%;
+  max-width: 300px;
+  height: 300px;
   margin: 0 auto 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .donut-ring {
@@ -622,9 +928,10 @@ const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
 
 .chart-legend {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  justify-content: center;
+  gap: 32px;
   padding: 0 24px 24px 24px;
+  flex-wrap: wrap;
 }
 
 .legend-item {
@@ -656,7 +963,11 @@ const unpaidUsersCard = computed(() => toNumber(unpaidUsersCount.value))
 }
 
 /* Enhanced SVG line chart styles */
-.svg-chart { width: 100%; height: 220px; }
+.svg-chart { 
+  width: 100%; 
+  height: 100%; 
+  min-height: 200px;
+}
 .y-grid line { stroke: #ecf0f1; stroke-width: 1; }
 .x-grid line { stroke: #f4f6f7; stroke-width: 1; }
 .line { fill: none; stroke: #27ae60; stroke-width: 2; }

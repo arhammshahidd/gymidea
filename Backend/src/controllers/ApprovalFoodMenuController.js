@@ -33,10 +33,19 @@ exports.list = async (req, res, next) => {
       .limit(limit)
       .offset((page - 1) * limit);
     
-    // Parse JSON fields for response
+    // Parse JSON fields robustly (string or already parsed)
+    const toArray = (val) => {
+      if (!val) return []
+      if (Array.isArray(val)) return val
+      if (typeof val === 'string') {
+        try { const j = JSON.parse(val); return Array.isArray(j) ? j : [] } catch { return [] }
+      }
+      return []
+    }
+
     const parsedRows = rows.map(row => ({
       ...row,
-      food_items: row.food_items ? JSON.parse(row.food_items) : []
+      food_items: toArray(row.food_items)
     }));
     
     const [{ count }] = await db('approval_food_menu')
@@ -79,7 +88,7 @@ exports.get = async (req, res, next) => {
     // Parse JSON fields for response
     const parsedRequest = {
       ...request,
-      food_items: request.food_items ? JSON.parse(request.food_items) : []
+      food_items: (Array.isArray(request.food_items)) ? request.food_items : (typeof request.food_items === 'string' ? (()=>{ try { return JSON.parse(request.food_items) } catch { return [] } })() : [])
     };
     
     res.json({

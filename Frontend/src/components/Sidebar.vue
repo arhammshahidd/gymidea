@@ -3,6 +3,7 @@
     <!-- Logo Section -->
     <div class="logo-section">
       <div class="logo-icon">🏋️</div>
+      <div class="logo-text">Gym Management</div>
     </div>
 
     <!-- Navigation Menu -->
@@ -36,6 +37,9 @@ import { useAuthStore } from '../stores/auth'
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+
+// Emit events to parent
+const emit = defineEmits(['close-drawer'])
 
 const drawerOpen = ref(true)
 const currentModule = ref('')
@@ -129,6 +133,11 @@ const navigateTo = (route) => {
   try {
     router.push(route)
     console.log('Navigation successful')
+    
+    // Close drawer on mobile after navigation
+    if (window.innerWidth < 768) {
+      emit('close-drawer')
+    }
   } catch (error) {
     console.error('Navigation error:', error)
   }
@@ -141,6 +150,11 @@ const logout = () => {
   console.log('Current role before logout:', currentRole)
   
   authStore.logout()
+  
+  // Close drawer on mobile
+  if (window.innerWidth < 768) {
+    emit('close-drawer')
+  }
   
   // Redirect to appropriate login page based on role
   if (currentRole === 'SUPER_ADMIN') {
@@ -172,23 +186,20 @@ watch(() => route.path, () => {
 
 <style scoped>
 .sidebar {
-  width: 280px;
+  width: 100%;
   background: #f8f9fa;
-  border-right: 1px solid #e9ecef;
   display: flex;
   flex-direction: column;
   height: 100vh;
-  position: fixed;
-  left: 0;
-  top: 0;
 }
 
 .logo-section {
   padding: 24px 20px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
   border-bottom: 1px solid #e9ecef;
+  text-align: center;
 }
 
 .logo-icon {
@@ -201,6 +212,13 @@ watch(() => route.path, () => {
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 12px rgba(39, 174, 96, 0.3);
+  margin-bottom: 12px;
+}
+
+.logo-text {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #2c3e50;
 }
 
 .nav-menu {

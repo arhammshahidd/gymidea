@@ -1,5 +1,76 @@
 const db = require('../config/db');
 
+// Helper function to create daily plans from training plan
+async function createDailyTrainingPlansFromPlan(plan, items, user_id, gym_id) {
+  try {
+    const startDate = new Date(plan.start_date);
+    const endDate = new Date(plan.end_date);
+    const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
+    
+    const dailyPlans = [];
+    
+    for (let i = 0; i < totalDays; i++) {
+      const planDate = new Date(startDate);
+      planDate.setDate(startDate.getDate() + i);
+      const dateStr = planDate.toISOString().split('T')[0];
+      
+      // Distribute items across days
+      const itemsPerDay = Math.ceil(items.length / totalDays);
+      const dayItems = items.slice(i * itemsPerDay, (i + 1) * itemsPerDay);
+      
+      const totalSets = dayItems.reduce((sum, item) => sum + (item.sets || 0), 0);
+      const totalReps = dayItems.reduce((sum, item) => sum + (item.reps || 0), 0);
+      const totalWeight = dayItems.reduce((sum, item) => sum + (item.weight_kg || 0), 0);
+      const totalMinutes = dayItems.reduce((sum, item) => sum + (item.minutes || 0), 0);
+      
+      dailyPlans.push({
+        user_id,
+        gym_id,
+        plan_date: dateStr,
+        plan_type: 'manual',
+        source_plan_id: plan.id,
+        plan_category: plan.exercise_plan_category,
+        workout_name: dayItems[0]?.workout_name || 'Daily Workout',
+        total_exercises: dayItems.length,
+        training_minutes: totalMinutes,
+        total_sets: totalSets,
+        total_reps: totalReps,
+        total_weight_kg: totalWeight,
+        user_level: dayItems[0]?.user_level || 'Beginner',
+        exercises_details: JSON.stringify(dayItems)
+      });
+    }
+    
+    // Insert daily plans
+    const insertedPlans = await db('daily_training_plans').insert(dailyPlans).returning('*');
+    
+    // Insert plan items
+    for (const dailyPlan of insertedPlans) {
+      const exercises = JSON.parse(dailyPlan.exercises_details || '[]');
+      if (exercises.length > 0) {
+        const items = exercises.map(ex => ({
+          daily_plan_id: dailyPlan.id,
+          exercise_name: ex.workout_name || 'Exercise',
+          sets: ex.sets || 0,
+          reps: ex.reps || 0,
+          weight_kg: ex.weight_kg || 0,
+          minutes: ex.minutes || 0,
+          exercise_type: ex.exercise_types || null,
+          notes: null
+        }));
+        
+        await db('daily_training_plan_items').insert(items);
+      }
+    }
+    
+    console.log(`Created ${insertedPlans.length} daily training plans for user ${user_id}`);
+    return insertedPlans;
+  } catch (error) {
+    console.error('Error creating daily training plans:', error);
+    return [];
+  }
+}
+
 exports.createPlan = async (req, res) => {
   try {
     const { user_id, start_date, end_date, exercise_plan_category, total_workouts, total_exercises, training_minutes, items = [] } = req.body;
@@ -15,6 +86,7 @@ exports.createPlan = async (req, res) => {
       .returning('*');
 
     // Insert items if provided
+    let planItems = [];
     if (Array.isArray(items) && items.length) {
       const rows = items.map((it) => ({
         plan_id: plan.id,
@@ -27,7 +99,15 @@ exports.createPlan = async (req, res) => {
         minutes: it.minutes || 0,
         user_level: it.user_level || 'Beginner',
       }));
-      await db('app_manual_training_plan_items').insert(rows);
+      planItems = await db('app_manual_training_plan_items').insert(rows).returning('*');
+    }
+
+    // Automatically create daily plans for easy mobile access
+    try {
+      await createDailyTrainingPlansFromPlan(plan, planItems, user_id, gymId);
+    } catch (dailyPlanError) {
+      console.error('Failed to create daily plans:', dailyPlanError);
+      // Don't fail the main request if daily plans creation fails
     }
 
     return res.status(201).json({ success: true, data: plan });

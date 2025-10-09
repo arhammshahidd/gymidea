@@ -197,6 +197,21 @@
               </q-badge>
             </q-td>
           </template>
+
+          <template v-slot:body-cell-payment_status="props">
+            <q-td :props="props" class="text-center">
+              <q-badge
+                :color="((props.row.latest_payment_status||'').toLowerCase()==='paid') ? 'positive' : 'negative'"
+                class="status-badge"
+              >
+                <q-icon 
+                  :name="((props.row.latest_payment_status||'').toLowerCase()==='paid') ? 'payments' : 'report_problem'"
+                  class="q-mr-xs"
+                />
+                {{ ((props.row.latest_payment_status||'').toLowerCase()==='paid') ? 'Paid' : 'Unpaid' }}
+              </q-badge>
+            </q-td>
+          </template>
           
           <template v-slot:body-cell-actions="props">
             <q-td :props="props" class="text-center">
@@ -403,6 +418,7 @@ const columns = [
   { name: 'phone', label: 'Phone', field: 'phone', align: 'left' },
   { name: 'status', label: 'Status', field: 'status', align: 'center' },
   { name: 'membership_tier', label: 'Membership', field: 'membership_tier', align: 'center' },
+  { name: 'payment_status', label: 'Payment', field: 'latest_payment_status', align: 'center' },
   { name: 'created_at', label: 'Created', field: row => new Date(row.created_at).toLocaleDateString(), align: 'left' },
   { name: 'actions', label: 'Actions', field: 'actions', align: 'right' }
 ]

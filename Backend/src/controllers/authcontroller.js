@@ -188,3 +188,25 @@ exports.trainerLogin = async (req, res, next) => {
     next(err);
   }
 };
+
+// Token validation endpoint for mobile apps
+exports.validateToken = async (req, res) => {
+  try {
+    // If we reach here, the token is valid (auth middleware already validated it)
+    const user = req.user;
+    
+    res.json({
+      success: true,
+      valid: true,
+      user: {
+        id: user.id,
+        role: user.role,
+        gym_id: user.gym_id,
+        token_version: user.token_version
+      }
+    });
+  } catch (err) {
+    console.error('Token validation error:', err);
+    res.status(500).json({ success: false, message: 'Token validation failed' });
+  }
+};

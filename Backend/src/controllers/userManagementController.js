@@ -55,7 +55,7 @@ exports.getUserStats = async (req, res) => {
   }
 };
 
-// Get all users for the gym
+// Get all users for the gym (with latest payment status)
 exports.getAllUsers = async (req, res) => {
   try {
     const gymId = req.user.gym_id;
@@ -63,10 +63,33 @@ exports.getAllUsers = async (req, res) => {
     console.log('=== GETTING ALL USERS ===');
     console.log('Gym ID:', gymId);
 
-    const users = await db('users')
-      .where({ gym_id: gymId })
-      .select('id', 'name', 'email', 'phone', 'status', 'membership_tier', 'is_paid', 'created_at', 'updated_at')
-      .orderBy('created_at', 'desc');
+    // Join latest payment status per user (based on most recent payment-related timestamp)
+    const users = await db('users as u')
+      .where({ 'u.gym_id': gymId })
+      .leftJoin(
+        db.raw(`LATERAL (
+          SELECT ps.payment_status
+          FROM payment_status ps
+          WHERE ps.user_id = u.id AND ps.gym_id = ?
+          ORDER BY COALESCE(ps.payment_date, ps.created_at, ps.updated_at) DESC, ps.id DESC
+          LIMIT 1
+        ) latest`, [gymId]),
+        db.raw('TRUE'),
+        db.raw('TRUE')
+      )
+      .select(
+        'u.id',
+        'u.name',
+        'u.email',
+        'u.phone',
+        'u.status',
+        'u.membership_tier',
+        'u.is_paid',
+        'u.created_at',
+        'u.updated_at',
+        db.raw('latest.payment_status as latest_payment_status')
+      )
+      .orderBy('u.created_at', 'desc');
 
     console.log('Found users:', users.length);
     res.json({ success: true, data: users });

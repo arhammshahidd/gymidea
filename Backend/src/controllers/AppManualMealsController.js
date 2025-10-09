@@ -1,5 +1,77 @@
 const db = require('../config/db');
 
+// Helper function to create daily nutrition plans from meal plan
+async function createDailyNutritionPlansFromPlan(plan, items, user_id, gym_id) {
+  try {
+    const startDate = new Date(plan.start_date);
+    const endDate = new Date(plan.end_date);
+    const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
+    
+    const dailyPlans = [];
+    
+    for (let i = 0; i < totalDays; i++) {
+      const planDate = new Date(startDate);
+      planDate.setDate(startDate.getDate() + i);
+      const dateStr = planDate.toISOString().split('T')[0];
+      
+      // Distribute items across days
+      const itemsPerDay = Math.ceil(items.length / totalDays);
+      const dayItems = items.slice(i * itemsPerDay, (i + 1) * itemsPerDay);
+      
+      const dailyTotals = dayItems.reduce((totals, item) => {
+        totals.calories += Number(item.calories || 0);
+        totals.proteins += Number(item.proteins || 0);
+        totals.fats += Number(item.fats || 0);
+        totals.carbs += Number(item.carbs || 0);
+        return totals;
+      }, { calories: 0, proteins: 0, fats: 0, carbs: 0 });
+      
+      dailyPlans.push({
+        user_id,
+        gym_id,
+        plan_date: dateStr,
+        plan_type: 'manual',
+        source_plan_id: plan.id,
+        plan_category: plan.meal_category,
+        total_calories: dailyTotals.calories,
+        total_proteins: dailyTotals.proteins,
+        total_fats: dailyTotals.fats,
+        total_carbs: dailyTotals.carbs,
+        meal_details: JSON.stringify(dayItems)
+      });
+    }
+    
+    // Insert daily plans
+    const insertedPlans = await db('daily_nutrition_plans').insert(dailyPlans).returning('*');
+    
+    // Insert plan items
+    for (const dailyPlan of insertedPlans) {
+      const meals = JSON.parse(dailyPlan.meal_details || '[]');
+      if (meals.length > 0) {
+        const items = meals.map(meal => ({
+          daily_plan_id: dailyPlan.id,
+          meal_type: meal.meal_type || 'Breakfast',
+          food_item_name: meal.food_item_name || 'Food Item',
+          grams: meal.grams || 0,
+          calories: meal.calories || 0,
+          proteins: meal.proteins || 0,
+          fats: meal.fats || 0,
+          carbs: meal.carbs || 0,
+          notes: null
+        }));
+        
+        await db('daily_nutrition_plan_items').insert(items);
+      }
+    }
+    
+    console.log(`Created ${insertedPlans.length} daily nutrition plans for user ${user_id}`);
+    return insertedPlans;
+  } catch (error) {
+    console.error('Error creating daily nutrition plans:', error);
+    return [];
+  }
+}
+
 function sumMacros(items) {
   return items.reduce((acc, it) => {
     acc.total_calories += Number(it.calories || 0);
@@ -29,6 +101,7 @@ exports.createPlan = async (req, res) => {
       ...macroTotals
     }).returning('*');
 
+    let planItems = [];
     if (Array.isArray(items) && items.length) {
       const rows = items.map((it) => ({
         plan_id: plan.id,
@@ -41,7 +114,15 @@ exports.createPlan = async (req, res) => {
         fats: it.fats || 0,
         carbs: it.carbs || 0,
       }));
-      await db('app_manual_meal_plan_items').insert(rows);
+      planItems = await db('app_manual_meal_plan_items').insert(rows).returning('*');
+    }
+
+    // Automatically create daily plans for easy mobile access
+    try {
+      await createDailyNutritionPlansFromPlan(plan, planItems, user_id, gymId);
+    } catch (dailyPlanError) {
+      console.error('Failed to create daily nutrition plans:', dailyPlanError);
+      // Don't fail the main request if daily plans creation fails
     }
 
     return res.status(201).json({ success: true, data: plan });

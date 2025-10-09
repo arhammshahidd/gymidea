@@ -17,6 +17,9 @@ router.post('/generated', auth(), ctrl.createGeneratedPlan);
 router.put('/generated/:id', auth(), ctrl.updateGeneratedPlan);
 router.delete('/generated/:id', auth(), ctrl.deleteGeneratedPlan);
 
+// Bulk insert items for an existing generated plan
+router.post('/items/bulk', auth(), ctrl.bulkInsertItems);
+
 module.exports = router;
 
 

@@ -122,12 +122,11 @@ exports.create = async (req, res, next) => {
       });
     }
     
-    // Validate menu plan category
-    const validCategories = ['Weight Gain', 'Weight Lose', 'Muscle building'];
-    if (!validCategories.includes(menu_plan_category)) {
+    // Validate menu plan category (accept any non-empty string from mobile app)
+    if (typeof menu_plan_category !== 'string' || menu_plan_category.trim().length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'menu_plan_category must be one of: Weight Gain, Weight Lose, Muscle building'
+        message: 'menu_plan_category must be a non-empty string'
       });
     }
     
@@ -235,13 +234,12 @@ exports.update = async (req, res, next) => {
       });
     }
     
-    // Validate menu plan category if provided
-    if (menu_plan_category) {
-      const validCategories = ['Weight Gain', 'Weight Lose', 'Muscle building'];
-      if (!validCategories.includes(menu_plan_category)) {
+    // Validate menu plan category if provided (accept any non-empty string)
+    if (menu_plan_category !== undefined) {
+      if (typeof menu_plan_category !== 'string' || menu_plan_category.trim().length === 0) {
         return res.status(400).json({
           success: false,
-          message: 'menu_plan_category must be one of: Weight Gain, Weight Lose, Muscle building'
+          message: 'menu_plan_category must be a non-empty string'
         });
       }
     }

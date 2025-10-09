@@ -15,11 +15,30 @@ function coerceString(value, fallback = null) {
 // AI Plan Requests (input parameters)
 exports.createRequest = async (req, res) => {
   try {
-    const { user_id, exercise_plan, age, height_cm, weight_kg, gender, future_goal, user_level } = req.body;
+    // Accept alternate mobile field names and coerce values
+    const body = req.body || {};
+    const user_id = body.user_id ?? body.userId ?? body.uid;
+    const exercise_plan = body.exercise_plan ?? body.exercise_plan_category ?? body.plan_category ?? body.exercise_category;
+    const age = body.age ?? body.user_age;
+    const height_cm = body.height_cm ?? body.height ?? body.height_in_cm;
+    const weight_kg = body.weight_kg ?? body.weight ?? body.weight_in_kg;
+    const gender = body.gender ?? body.sex;
+    const future_goal = body.future_goal ?? body.goal ?? body.future_goals;
+    const user_level = body.user_level ?? body.level;
     const gymId = req.user?.gym_id ?? null;
-    if (!user_id || !exercise_plan || !age || !height_cm || !weight_kg || !gender || !future_goal) {
-      return res.status(400).json({ success: false, message: 'All fields are required' });
+
+    const missing = [];
+    if (!user_id) missing.push('user_id');
+    if (!exercise_plan) missing.push('exercise_plan');
+    if (!age && age !== 0) missing.push('age');
+    if (!height_cm && height_cm !== 0) missing.push('height_cm');
+    if (!weight_kg && weight_kg !== 0) missing.push('weight_kg');
+    if (!gender) missing.push('gender');
+    if (!future_goal) missing.push('future_goal');
+    if (missing.length) {
+      return res.status(400).json({ success: false, message: `Missing required fields: ${missing.join(', ')}` });
     }
+
     const normalizedGender = String(gender).toLowerCase();
     const allowed = ['male', 'female', 'other'];
     const genderValue = allowed.includes(normalizedGender) ? normalizedGender : 'other';

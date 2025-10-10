@@ -455,6 +455,8 @@ exports.getTodaysPlans = async (req, res) => {
   try {
     const { user_id } = req.params;
     const today = new Date().toISOString().split('T')[0];
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
     
     if (!user_id) {
       return res.status(400).json({ 
@@ -463,14 +465,21 @@ exports.getTodaysPlans = async (req, res) => {
       });
     }
     
+    // SECURITY: Ensure proper user isolation
+    let targetUserId = user_id;
+    if (requestingUserRole !== 'gym_admin' && requestingUserRole !== 'trainer') {
+      // Regular users can only access their own plans
+      targetUserId = requestingUserId;
+    }
+    
     // Get today's training plan
     const trainingPlan = await db('daily_training_plans')
-      .where({ user_id, plan_date: today })
+      .where({ user_id: targetUserId, plan_date: today })
       .first();
     
     // Get today's nutrition plan
     const nutritionPlan = await db('daily_nutrition_plans')
-      .where({ user_id, plan_date: today })
+      .where({ user_id: targetUserId, plan_date: today })
       .first();
     
     // Get items for each plan

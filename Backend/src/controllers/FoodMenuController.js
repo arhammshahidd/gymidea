@@ -100,8 +100,12 @@ exports.listAssignments = async (req, res, next) => {
     // Return ONLY the snapshot stored on the assignment rows.
     const rows = await q
       .leftJoin('food_menu as m', 'm.id', 'a.food_menu_id')
+      .leftJoin('users as u', 'u.id', 'a.user_id')
       .select(
-        'a.*'
+        'a.*',
+        'u.name as user_name',
+        'u.phone as user_phone',
+        'u.email as user_email'
       )
       .limit(limit)
       .offset((page - 1) * limit)
@@ -121,11 +125,18 @@ exports.listAssignments = async (req, res, next) => {
         total_daily_protein: Number(assignment.total_daily_protein || 0) || totals.total_daily_protein,
         total_daily_carbs: Number(assignment.total_daily_carbs || 0) || totals.total_daily_carbs,
         total_daily_fats: Number(assignment.total_daily_fats || 0) || totals.total_daily_fats,
+        // User information
+        user_name: assignment.user_name,
+        user_phone: assignment.user_phone,
+        user_email: assignment.user_email
       }
     });
 
     console.log('Backend: Returning assignments:', parsedRows.map(r => ({
       id: r.id,
+      user_id: r.user_id,
+      user_name: r.user_name,
+      user_phone: r.user_phone,
       menu_plan_category: r.menu_plan_category,
       breakfast: r.breakfast ? 'Has breakfast data' : 'No breakfast data',
       lunch: r.lunch ? 'Has lunch data' : 'No lunch data',
@@ -144,12 +155,26 @@ exports.getUserFoodAssignments = async (req, res, next) => {
     const { user_id } = req.params
     const { page = 1, limit = 50 } = req.query
 
-    const rows = await db('food_menu_assignments as a')
+    // SECURITY: Ensure the requesting user can only access their own assignments
+    // or if it's a gym admin/trainer, they can access any user in their gym
+    const requestingUserId = req.user.id
+    const requestingUserRole = req.user.role
+    
+    let query = db('food_menu_assignments as a')
       .where('a.gym_id', req.user.gym_id)
-      .andWhere('a.user_id', Number(user_id))
       .orderBy('a.created_at', 'desc')
       .limit(limit)
       .offset((page - 1) * limit)
+
+    // If the requesting user is not an admin/trainer, they can only see their own assignments
+    if (requestingUserRole !== 'gym_admin' && requestingUserRole !== 'trainer') {
+      query = query.andWhere('a.user_id', requestingUserId)
+    } else {
+      // Admin/trainer can access specific user's assignments
+      query = query.andWhere('a.user_id', Number(user_id))
+    }
+
+    const rows = await query
 
     // Parse JSON meal fields for mobile consumption
     const parsed = rows.map((a) => {

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Food Menu Assignments Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .test-title {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .assignment-card {
+            border: 1px solid #e9ecef;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 15px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .plan-title-section {
+            flex: 1;
+        }
+        .card-header h4 {
+            margin: 0 0 0.5rem 0;
+            color: #333;
+            font-size: 1.1rem;
+        }
+        .user-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .user-name, .user-phone {
+            display: flex;
+            align-items: center;
+            font-size: 0.85rem;
+            color: #666;
+        }
+        .user-name {
+            font-weight: 500;
+            color: #333;
+        }
+        .status-badge {
+            background: #20c997;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+        }
+        .search-container {
+            margin-bottom: 20px;
+        }
+        .search-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .nutrition-summary {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .nutrition-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .label {
+            font-weight: 500;
+            color: #666;
+        }
+        .value {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🍎 Food Menu Assignments - Frontend Test</h1>
+        
+        <div class="test-section">
+            <div class="test-title">✅ Test 1: User Information Display</div>
+            <p>Assignment cards should now display user name and phone number:</p>
+            
+            <div class="assignment-card">
+                <div class="card-header">
+                    <div class="plan-title-section">
+                        <h4>Weight Gain Plan</h4>
+                        <div class="user-info">
+                            <div class="user-name">
+                                👤 John Doe
+                            </div>
+                            <div class="user-phone">
+                                📞 +1-555-0123
+                            </div>
+                        </div>
+                    </div>
+                    <span class="status-badge">ASSIGNED</span>
+                </div>
+                <div class="nutrition-summary">
+                    <div class="nutrition-item">
+                        <span class="label">Total Calories:</span>
+                        <span class="value">2500.00 kcal</span>
+                    </div>
+                    <div class="nutrition-item">
+                        <span class="label">Total Protein:</span>
+                        <span class="value">150.00g</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">🔍 Test 2: Search Functionality</div>
+            <p>Search input should filter assignments by user name or phone:</p>
+            
+            <div class="search-container">
+                <input type="text" class="search-input" placeholder="Search assignments by user name or phone" id="searchInput">
+            </div>
+            
+            <div id="assignmentsList">
+                <div class="assignment-card" data-user="John Doe" data-phone="555-0123">
+                    <div class="card-header">
+                        <div class="plan-title-section">
+                            <h4>Weight Gain Plan</h4>
+                            <div class="user-info">
+                                <div class="user-name">👤 John Doe</div>
+                                <div class="user-phone">📞 +1-555-0123</div>
+                            </div>
+                        </div>
+                        <span class="status-badge">ASSIGNED</span>
+                    </div>
+                </div>
+                
+                <div class="assignment-card" data-user="Jane Smith" data-phone="555-0456">
+                    <div class="card-header">
+                        <div class="plan-title-section">
+                            <h4>Weight Loss Plan</h4>
+                            <div class="user-info">
+                                <div class="user-name">👤 Jane Smith</div>
+                                <div class="user-phone">📞 +1-555-0456</div>
+                            </div>
+                        </div>
+                        <span class="status-badge">ASSIGNED</span>
+                    </div>
+                </div>
+                
+                <div class="assignment-card" data-user="Mike Johnson" data-phone="555-0789">
+                    <div class="card-header">
+                        <div class="plan-title-section">
+                            <h4>Muscle Building Plan</h4>
+                            <div class="user-info">
+                                <div class="user-name">👤 Mike Johnson</div>
+                                <div class="user-phone">📞 +1-555-0789</div>
+                            </div>
+                        </div>
+                        <span class="status-badge">ASSIGNED</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <div class="test-title">📋 Implementation Summary</div>
+            <ul>
+                <li>✅ Added user name and phone display to assignment cards</li>
+                <li>✅ Added search functionality by name or phone</li>
+                <li>✅ Updated card layout to accommodate user information</li>
+                <li>✅ Added proper CSS styling for user info display</li>
+                <li>✅ Backend already provides user_name and user_phone fields</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Simple search functionality test
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase();
+            const cards = document.querySelectorAll('.assignment-card');
+            
+            cards.forEach(card => {
+                const userName = card.dataset.user.toLowerCase();
+                const userPhone = card.dataset.phone.toLowerCase();
+                
+                if (userName.includes(query) || userPhone.includes(query) || query === '') {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

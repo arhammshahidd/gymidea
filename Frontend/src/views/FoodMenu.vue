@@ -376,13 +376,38 @@
     <div class="section">
       <div class="section-header">
         <h2>My Assignments</h2>
+        <div class="search-container">
+          <q-input
+            v-model="assignmentSearchQuery"
+            placeholder="Search assignments by user name or phone"
+            outlined
+            clearable
+            class="search-input"
+          >
+            <template v-slot:prepend>
+              <q-icon name="search" color="primary" />
+            </template>
+          </q-input>
+        </div>
       </div>
       <div v-if="loadingAssignments" class="q-pa-md">Loading assignments...</div>
       <div v-else>
-        <div v-if="allAssignments && allAssignments.length" class="nutrition-cards-grid">
-          <div v-for="a in allAssignments" :key="a.id" class="nutrition-card">
+        <div v-if="filteredAssignments && filteredAssignments.length" class="nutrition-cards-grid">
+          <div v-for="a in filteredAssignments" :key="a.id" class="nutrition-card">
             <div class="card-header">
-              <h4>{{ a.menu_plan_category }} Plan</h4>
+              <div class="plan-title-section">
+                <h4>{{ a.menu_plan_category }} Plan</h4>
+                <div class="user-info">
+                  <div class="user-name">
+                    <q-icon name="person" size="16px" class="q-mr-xs" />
+                    {{ a.user_name || 'Unknown User' }}
+                  </div>
+                  <div class="user-phone">
+                    <q-icon name="phone" size="16px" class="q-mr-xs" />
+                    {{ a.user_phone || 'No phone' }}
+                  </div>
+                </div>
+              </div>
               <q-badge :color="(a.status || 'ASSIGNED') === 'ASSIGNED' ? 'teal' : 'orange'" :label="a.status || 'ASSIGNED'" class="status-badge" />
             </div>
             <div class="card-content">
@@ -1081,6 +1106,7 @@ console.log('updateAssignment method:', typeof foodMenuStore.updateAssignment)
 // Reactive data
 const userSearchQuery = ref('')
 const nutritionSearchQuery = ref('')
+const assignmentSearchQuery = ref('')
 const loadingUsers = ref(false)
 const savingPlan = ref(false)
 const assigningPlan = ref(false)
@@ -1195,6 +1221,17 @@ const filteredNutritionPlans = computed(() => {
     plan.menu_plan_category.toLowerCase().includes(query) ||
     plan.start_date.toLowerCase().includes(query) ||
     plan.end_date.toLowerCase().includes(query)
+  )
+})
+
+const filteredAssignments = computed(() => {
+  if (!assignmentSearchQuery.value) return allAssignments.value
+  
+  const query = assignmentSearchQuery.value.toLowerCase()
+  return allAssignments.value.filter(assignment => 
+    (assignment.user_name && assignment.user_name.toLowerCase().includes(query)) ||
+    (assignment.user_phone && assignment.user_phone.toLowerCase().includes(query)) ||
+    (assignment.menu_plan_category && assignment.menu_plan_category.toLowerCase().includes(query))
   )
 })
 
@@ -2014,16 +2051,38 @@ const deleteAssignmentPlan = async (assignmentId) => {
 .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid #e9ecef;
 }
 
+.plan-title-section {
+  flex: 1;
+}
+
 .card-header h4 {
-  margin: 0;
+  margin: 0 0 0.5rem 0;
   color: #333;
   font-size: 1.1rem;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.user-name, .user-phone {
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.user-name {
+  font-weight: 500;
+  color: #333;
 }
 
 .card-content {

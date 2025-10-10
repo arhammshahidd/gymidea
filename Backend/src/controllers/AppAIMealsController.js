@@ -324,8 +324,23 @@ exports.deleteGeneratedPlan = async (req, res) => {
 exports.getGeneratedPlan = async (req, res) => {
   try {
     const { id } = req.params;
-    const plan = await db('app_ai_generated_meal_plans').where({ id }).first();
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
+    
+    let query = db('app_ai_generated_meal_plans').where({ id });
+    
+    // SECURITY: Ensure proper user isolation
+    if (requestingUserRole !== 'gym_admin' && requestingUserRole !== 'trainer') {
+      // Regular users can only access their own plans
+      query = query.andWhere({ user_id: requestingUserId, gym_id: req.user.gym_id });
+    } else {
+      // Admin/trainer can access any plan in their gym
+      query = query.andWhere({ gym_id: req.user.gym_id });
+    }
+    
+    const plan = await query.first();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
+    
     const items = await db('app_ai_generated_meal_plan_items').where({ plan_id: id }).orderBy(['date', 'id']);
     return res.json({ success: true, data: { ...plan, items } });
   } catch (err) {
@@ -337,8 +352,26 @@ exports.getGeneratedPlan = async (req, res) => {
 exports.listGeneratedPlans = async (req, res) => {
   try {
     const { user_id } = req.query;
-    const qb = db('app_ai_generated_meal_plans').select('*').orderBy('created_at', 'desc');
-    if (user_id) qb.where({ user_id });
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
+    
+    let qb = db('app_ai_generated_meal_plans')
+      .select('*')
+      .orderBy('created_at', 'desc');
+    
+    // SECURITY: Ensure proper user isolation
+    if (requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer') {
+      // Admin/trainer can see plans for specific users or all users in their gym
+      if (user_id) {
+        qb = qb.where({ user_id: Number(user_id), gym_id: req.user.gym_id });
+      } else {
+        qb = qb.where({ gym_id: req.user.gym_id });
+      }
+    } else {
+      // Regular users can only see their own plans
+      qb = qb.where({ user_id: requestingUserId, gym_id: req.user.gym_id });
+    }
+    
     const rows = await qb;
     return res.json({ success: true, data: rows });
   } catch (err) {

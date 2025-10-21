@@ -18,7 +18,7 @@
               class="search-input"
             >
               <template v-slot:prepend>
-                <q-icon name="search" color="primary" />
+                <q-icon name="search" :style="{ color: '#DF8A35' }" />
               </template>
             </q-input>
           </div>
@@ -34,15 +34,15 @@
           <q-card-section class="q-pa-lg">
             <div class="row items-center no-wrap">
               <q-avatar 
-                color="primary" 
+                :style="{ backgroundColor: '#DF8A35', border: '2px solid #DF8A35' }"
                 text-color="white" 
                 icon="people" 
                 size="48px"
                 class="q-mr-md"
               />
               <div class="stat-content">
-                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Total Users</div>
-                <div class="text-h4 text-weight-bold">{{ computedOverviewData.totalMembers || 0 }}</div>
+                <div class="text-caption text-weight-medium q-mb-xs" style="color: black !important;">Total Users</div>
+                <div class="text-h4 text-weight-bold" style="color: black !important;">{{ computedOverviewData.totalMembers || 0 }}</div>
               </div>
             </div>
           </q-card-section>
@@ -53,15 +53,15 @@
           <q-card-section class="q-pa-lg">
             <div class="row items-center no-wrap">
               <q-avatar 
-                color="positive" 
+                :style="{ backgroundColor: '#DF8A35', border: '2px solid #DF8A35' }"
                 text-color="white" 
                 icon="person_check" 
                 size="48px"
                 class="q-mr-md"
               />
               <div class="stat-content">
-                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Active Users</div>
-                <div class="text-h4 text-weight-bold">{{ computedOverviewData.activeMembers || 0 }}</div>
+                <div class="text-caption text-weight-medium q-mb-xs" style="color: black !important;">Active Users</div>
+                <div class="text-h4 text-weight-bold" style="color: black !important;">{{ computedOverviewData.activeMembers || 0 }}</div>
               </div>
             </div>
           </q-card-section>
@@ -72,15 +72,15 @@
           <q-card-section class="q-pa-lg">
             <div class="row items-center no-wrap">
               <q-avatar 
-                color="green" 
+                :style="{ backgroundColor: '#DF8A35', border: '2px solid #DF8A35' }"
                 text-color="white" 
                 icon="attach_money" 
                 size="48px"
                 class="q-mr-md"
               />
               <div class="stat-content">
-                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Paid Users</div>
-                <div class="text-h4 text-weight-bold">{{ computedOverviewData.paidMembers || 0 }}</div>
+                <div class="text-caption text-weight-medium q-mb-xs" style="color: black !important;">Paid Users</div>
+                <div class="text-h4 text-weight-bold" style="color: black !important;">{{ computedOverviewData.paidMembers || 0 }}</div>
               </div>
             </div>
           </q-card-section>
@@ -91,15 +91,15 @@
           <q-card-section class="q-pa-lg">
             <div class="row items-center no-wrap">
               <q-avatar 
-                color="warning" 
+                :style="{ backgroundColor: '#DF8A35', border: '2px solid #DF8A35' }"
                 text-color="white" 
                 icon="money_off" 
                 size="48px"
                 class="q-mr-md"
               />
               <div class="stat-content">
-                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Unpaid Users</div>
-                <div class="text-h4 text-weight-bold">{{ computedOverviewData.unpaidMembers || 0 }}</div>
+                <div class="text-caption text-weight-medium q-mb-xs" style="color: black !important;">Unpaid Users</div>
+                <div class="text-h4 text-weight-bold" style="color: black !important;">{{ computedOverviewData.unpaidMembers || 0 }}</div>
               </div>
             </div>
           </q-card-section>
@@ -110,15 +110,15 @@
           <q-card-section class="q-pa-lg">
             <div class="row items-center no-wrap">
               <q-avatar 
-                color="negative" 
+                :style="{ backgroundColor: '#DF8A35', border: '2px solid #DF8A35' }"
                 text-color="white" 
                 icon="person_off" 
                 size="48px"
                 class="q-mr-md"
               />
               <div class="stat-content">
-                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Inactive Users</div>
-                <div class="text-h4 text-weight-bold">{{ (computedOverviewData.totalMembers || 0) - (computedOverviewData.activeMembers || 0) }}</div>
+                <div class="text-caption text-weight-medium q-mb-xs" style="color: black !important;">Inactive Users</div>
+                <div class="text-h4 text-weight-bold" style="color: black !important;">{{ (computedOverviewData.totalMembers || 0) - (computedOverviewData.activeMembers || 0) }}</div>
               </div>
             </div>
           </q-card-section>
@@ -129,15 +129,15 @@
           <q-card-section class="q-pa-lg">
             <div class="row items-center no-wrap">
               <q-avatar 
-                color="purple" 
+                :style="{ backgroundColor: '#DF8A35', border: '2px solid #DF8A35' }"
                 text-color="white" 
                 icon="account_balance_wallet" 
                 size="48px"
                 class="q-mr-md"
               />
               <div class="stat-content">
-                <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">Total Amount</div>
-                <div class="text-h4 text-weight-bold">PKR{{ totalAmount || 0 }}</div>
+                <div class="text-caption text-weight-medium q-mb-xs" style="color: black !important;">Total Amount</div>
+                <div class="text-h4 text-weight-bold" style="color: black !important;">PKR{{ totalAmount || 0 }}</div>
               </div>
             </div>
           </q-card-section>
@@ -150,8 +150,8 @@
       <q-card-section class="q-pa-lg">
         <div class="row q-col-gutter-lg items-center">
           <div class="col-12 col-md-4">
-            <div class="text-h6 text-weight-bold text-primary q-mb-sm">Filters & Actions</div>
-            <div class="text-caption text-grey-6">Filter users by status and payment status</div>
+            <div class="text-h6 text-weight-bold q-mb-sm" style="color: black !important;">Filters & Actions</div>
+            <div class="text-caption" style="color: black !important;">Filter users by status and payment status</div>
           </div>
           <div class="col-12 col-md-3">
             <q-select
@@ -166,7 +166,7 @@
               map-options
             >
               <template v-slot:prepend>
-                <q-icon name="filter_list" color="primary" />
+                <q-icon name="filter_list" :style="{ color: '#DF8A35' }" />
               </template>
             </q-select>
           </div>
@@ -183,7 +183,7 @@
               map-options
             >
               <template v-slot:prepend>
-                <q-icon name="payment" color="primary" />
+                <q-icon name="payment" :style="{ color: '#DF8A35' }" />
               </template>
             </q-select>
           </div>
@@ -241,20 +241,20 @@
                 <!-- Card Header -->
                 <q-card-section class="user-card-header">
                   <div class="row items-center q-mb-sm">
-                    <q-avatar size="40px" color="primary" text-color="white" class="q-mr-md">
+                    <q-avatar size="40px" :style="{ backgroundColor: '#DF8A35', border: '2px solid #DF8A35' }" text-color="white" class="q-mr-md">
                       {{ card.name ? card.name.charAt(0).toUpperCase() : 'U' }}
                     </q-avatar>
                     <div>
-                      <div class="text-h6 text-primary text-weight-bold">#{{ card.id || 'N/A' }}</div>
+                      <div class="text-h6 text-weight-bold" style="color: black !important;">#{{ card.id || 'N/A' }}</div>
                       <div class="text-subtitle1 text-weight-medium">{{ card.name || 'N/A' }}</div>
                     </div>
                   </div>
                   <div class="contact-info">
-                    <div class="text-caption text-grey-6 q-mb-xs">
+                    <div class="text-caption q-mb-xs" style="color: black !important;">
                       <q-icon name="email" size="14px" class="q-mr-xs" />
                       {{ card.email || 'N/A' }}
                     </div>
-                    <div class="text-caption text-grey-6">
+                    <div class="text-caption" style="color: black !important;">
                       <q-icon name="phone" size="14px" class="q-mr-xs" />
                       {{ card.phone || 'N/A' }}
                     </div>
@@ -265,8 +265,8 @@
                 <q-card-section class="user-card-body">
                   <!-- Total Amount -->
                   <div class="amount-section q-mb-md">
-                    <div class="text-caption text-grey-6 q-mb-xs">Total Received</div>
-                    <div class="text-h5 text-weight-bold text-primary">PKR{{ card.totalAmount || 0 }}</div>
+                    <div class="text-caption q-mb-xs" style="color: black !important;">Total Received</div>
+                    <div class="text-h5 text-weight-bold" style="color: black !important;">PKR{{ card.totalAmount || 0 }}</div>
                   </div>
                   
                   <!-- Last Payment Information -->
@@ -1837,7 +1837,7 @@ onMounted(async () => {
 
 /* Header Card Styling */
 .header-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #DF8A35 100%, #000000 0%);
   border: none;
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
@@ -1904,7 +1904,7 @@ onMounted(async () => {
   left: 0;
   right: 0;
   height: 4px;
-  background: linear-gradient(90deg, var(--accent-color, #667eea), var(--accent-color-light, #764ba2));
+  background: linear-gradient(90deg, var(--accent-color, #DF8A35), var(--accent-color-light, #DF8A35));
 }
 
 .stat-card:hover {
@@ -1912,49 +1912,27 @@ onMounted(async () => {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
 }
 
-.stat-card-primary {
-  --accent-color: #667eea;
-  --accent-color-light: #764ba2;
-}
-
-.stat-card-success {
-  --accent-color: #4caf50;
-  --accent-color-light: #8bc34a;
-}
-
-.stat-card-paid {
-  --accent-color: #4caf50;
-  --accent-color-light: #66bb6a;
-}
-
-.stat-card-warning {
-  --accent-color: #ff9800;
-  --accent-color-light: #ffc107;
-}
-
-.stat-card-danger {
-  --accent-color: #f44336;
-  --accent-color-light: #ff7043;
-}
-
+.stat-card-primary,
+.stat-card-success,
+.stat-card-paid,
+.stat-card-warning,
+.stat-card-danger,
 .stat-card-purple {
-  --accent-color: #9c27b0;
-  --accent-color-light: #ba68c8;
+  --accent-color: #DF8A35;
+  --accent-color-light: #DF8A35;
 }
 
 .stat-content .text-caption {
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+  color: black !important;
 }
 
 .stat-content .text-h4 {
   margin-top: 8px;
   font-weight: 700;
-  background: linear-gradient(135deg, var(--accent-color), var(--accent-color-light));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: black !important;
 }
 
 /* Filters Card */

@@ -71,7 +71,7 @@ exports.create = async (req, res, next) => {
           workout_name: body.workout_name,
           sets: body.sets ?? 0,
           reps: body.reps ?? 0,
-          weight_kg: body.weight_kg ?? 0,
+          weight_kg: body.weight_kg === '' ? 0 : (parseFloat(body.weight_kg) || 0),
           category: body.category,
           plan_category_name: body.plan_category_name || body.category,
           total_days: totalDays,
@@ -129,7 +129,7 @@ exports.create = async (req, res, next) => {
           workout_name: body.workout_name,
           sets: body.sets ?? 0,
           reps: body.reps ?? 0,
-          weight_kg: body.weight_kg ?? 0,
+          weight_kg: body.weight_kg === '' ? 0 : (parseFloat(body.weight_kg) || 0),
           category: body.category,
           plan_category_name: body.plan_category_name || body.category,
           total_days: body.total_days || Math.ceil((new Date(body.end_date) - new Date(body.start_date)) / (1000 * 60 * 60 * 24)) + 1,
@@ -269,7 +269,7 @@ exports.updateStatus = async (req, res, next) => {
             training_minutes: distributedPlan.total_training_minutes || row.total_training_minutes || row.minutes || 0,
             sets: row.sets || 0,
             reps: row.reps || 0,
-            weight_kg: row.weight_kg || 0,
+            weight_kg: row.weight_kg === '' ? 0 : (parseFloat(row.weight_kg) || 0),
             exercises_details: JSON.stringify(distributedPlan.daily_plans),
             assign_to: row.user_id,
             created_by: req.user.id
@@ -293,7 +293,7 @@ exports.updateStatus = async (req, res, next) => {
             training_minutes: distributedPlan.total_training_minutes || row.total_training_minutes || row.minutes || 0,
             sets: row.sets || 0,
             reps: row.reps || 0,
-            weight_kg: row.weight_kg || 0,
+            weight_kg: row.weight_kg === '' ? 0 : (parseFloat(row.weight_kg) || 0),
             exercises_details: JSON.stringify(distributedPlan.daily_plans),
           })
           .returning('*');

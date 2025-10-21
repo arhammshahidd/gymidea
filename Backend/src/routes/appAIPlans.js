@@ -17,6 +17,9 @@ router.post('/generated', auth(), ctrl.createGeneratedPlan);
 router.put('/generated/:id', auth(), ctrl.updateGeneratedPlan);
 router.delete('/generated/:id', auth(), ctrl.deleteGeneratedPlan);
 
+// Generate endpoint (alias for /generated with generate_items=true)
+router.post('/generate', auth(), ctrl.createGeneratedPlan);
+
 module.exports = router;
 
 

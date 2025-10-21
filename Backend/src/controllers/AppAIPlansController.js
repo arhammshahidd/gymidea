@@ -1,4 +1,12 @@
 const db = require('../config/db');
+const axios = require('axios');
+
+// Gemini runtime config (override via env without code edits)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_BASE = process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com';
+const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1';
+const GEMINI_PRIMARY_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.0-flash-001';
 
 function coerceNumber(value, fallback = 0) {
   if (value === null || value === undefined || value === '') return fallback;
@@ -10,6 +18,235 @@ function coerceString(value, fallback = null) {
   if (value === null || value === undefined) return fallback;
   const s = String(value).trim();
   return s.length ? s : fallback;
+}
+
+// Generate workout items using Gemini AI via REST API
+async function generateWorkoutItemsWithGemini(params) {
+  const {
+    exercise_plan_category,
+    start_date,
+    end_date,
+    age,
+    height_cm,
+    weight_kg,
+    gender,
+    future_goal,
+    user_level,
+    plan_duration_days
+  } = params;
+
+  const prompt = `
+You are a fitness planning assistant. This is NON-MEDICAL and NON-SEXUAL general fitness guidance suitable for all audiences. Do not include medical advice.
+
+TASK:
+Generate a comprehensive training plan JSON for a ${plan_duration_days}-day program strictly in this schema:
+{
+  "items": [
+    {
+      "workout_name": string,            // primary muscle group: Chest | Back | Shoulders | Legs | Arms | Core
+      "exercise_types": number,          // count of distinct exercise types for this workout (6-12)
+      "sets": number,
+      "reps": number,
+      "weight_kg": number,
+      "minutes": number
+    }
+  ]
+}
+
+Rules:
+- Generate a comprehensive ${plan_duration_days}-day training plan with multiple workout variations
+- Create at least ${Math.ceil(plan_duration_days / 7) * 2} workout items to cover the full duration
+- Ensure realistic volumes for age ${age}, height ${height_cm} cm, weight ${weight_kg} kg, gender ${gender}
+- Goal: ${future_goal}
+- Category: ${exercise_plan_category}
+- User Level: ${user_level || 'Not specified'}
+- Dates: ${start_date} to ${end_date}
+- Use meaningful workout_name values like Chest, Back, Shoulders, Legs, Arms, Core (no placeholders like "Test Workout").
+- Set exercise_types as an integer count (6-12) representing the number of different exercises (for GIF selection).
+- Vary workout types throughout the plan (strength, cardio, flexibility, etc.)
+- Return ONLY valid JSON, no markdown, no commentary.
+- minutes must be realistic (30-90 minutes per workout)
+
+ABSOLUTE OUTPUT RULES:
+- Output must be strictly JSON object as defined above.
+- No preface, no explanation, no markdown code fences.
+
+Return ONLY the JSON object with the items array.
+`;
+
+  // helper to safely parse JSON even if model returns extra text
+  const parseItemsFromText = (text) => {
+    const tryParse = (candidate) => {
+      try {
+        return JSON.parse(candidate);
+      } catch (_err) {
+        return null;
+      }
+    };
+
+    // 1) Direct parse
+    let parsed = tryParse(text);
+
+    // 2) Remove code fences ```json ... ``` and retry (handle both complete and incomplete fences)
+    if (!parsed) {
+      // Try complete code fence first
+      const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+      if (fenced && fenced[1]) {
+        parsed = tryParse(fenced[1]);
+      }
+      
+      // If still no parse, try incomplete code fence (common when response is cut off)
+      if (!parsed) {
+        const incompleteFence = /```(?:json)?\s*([\s\S]*?)(?:\n|$)/i.exec(text);
+        if (incompleteFence && incompleteFence[1]) {
+          // Try to fix incomplete JSON by adding missing closing braces
+          let jsonText = incompleteFence[1].trim();
+          if (jsonText.startsWith('{') && !jsonText.endsWith('}')) {
+            // Count opening and closing braces to estimate what's missing
+            const openBraces = (jsonText.match(/\{/g) || []).length;
+            const closeBraces = (jsonText.match(/\}/g) || []).length;
+            const missingBraces = openBraces - closeBraces;
+            
+            // Add missing closing braces and brackets
+            if (jsonText.includes('"items": [')) {
+              jsonText += ']'.repeat(missingBraces > 1 ? missingBraces - 1 : 0);
+              jsonText += '}'.repeat(missingBraces);
+            } else {
+              jsonText += '}'.repeat(missingBraces);
+            }
+          }
+          parsed = tryParse(jsonText);
+        }
+      }
+    }
+
+    // 3) Extract the first JSON object block via regex (greedy, multiline)
+    if (!parsed) {
+      const objectMatch = /\{[\s\S]*\}/m.exec(text);
+      if (objectMatch) parsed = tryParse(objectMatch[0]);
+    }
+
+    // 4) If it returned an array at top-level (rare), wrap
+    if (!parsed) {
+      const arrayMatch = /\[[\s\S]*\]/m.exec(text);
+      if (arrayMatch) {
+        const arr = tryParse(arrayMatch[0]);
+        if (Array.isArray(arr)) parsed = { items: arr };
+      }
+    }
+
+    if (!parsed) throw new Error('Gemini returned non-JSON content');
+    if (!parsed.items || !Array.isArray(parsed.items)) throw new Error('Invalid response format from Gemini');
+    return parsed.items;
+  };
+
+  const callGemini = async (model) => {
+    const modelId = String(model).startsWith('models/') ? String(model).slice(7) : String(model);
+    const url = `${GEMINI_API_BASE}/${GEMINI_API_VERSION}/models/${modelId}:generateContent`;
+    const response = await axios.post(
+      url,
+      {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 8192
+        },
+        // keep default safety settings
+      },
+      { headers: { 'Content-Type': 'application/json' }, params: { key: GEMINI_API_KEY } }
+    );
+    const promptFeedback = response?.data?.promptFeedback;
+    const candidates = response?.data?.candidates || [];
+    const content = candidates?.[0]?.content || {};
+    const parts = content?.parts || [];
+    if (!parts.length) {
+      console.error('Gemini returned no parts. promptFeedback:', promptFeedback, 'safetyRatings:', candidates?.[0]?.safetyRatings);
+      throw new Error('Gemini returned empty content');
+    }
+    const text = parts.map(p => (typeof p?.text === 'string' ? p.text : '')).join('\n');
+    try {
+      return parseItemsFromText(text);
+    } catch (e) {
+      const preview = (text || '').slice(0, 500);
+      const shape = {
+        hasCandidates: Array.isArray(response?.data?.candidates),
+        numParts: parts.length,
+        partTypes: parts.map(p => (p && Object.keys(p)) || [])
+      };
+      console.error('Gemini parse failure preview:', preview);
+      console.error('Gemini response shape:', shape);
+      throw e;
+    }
+  };
+
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY is missing');
+  }
+
+  try {
+    return await callGemini(GEMINI_PRIMARY_MODEL);
+  } catch (err1) {
+    const status = err1?.response?.status;
+    const data = err1?.response?.data;
+    console.error('Gemini primary model failed', { model: GEMINI_PRIMARY_MODEL, status, data, message: err1.message });
+    // Retry with fallback model for 404/400
+    try {
+      return await callGemini(GEMINI_FALLBACK_MODEL);
+    } catch (err2) {
+      const status2 = err2?.response?.status;
+      const data2 = err2?.response?.data;
+      console.error('Gemini fallback model failed', { model: GEMINI_FALLBACK_MODEL, status: status2, data: data2, message: err2.message });
+      const reason = status2 || status || 'unknown error';
+      throw new Error(`Failed to generate workout plan with Gemini AI: HTTP ${reason}`);
+    }
+  }
+}
+
+// No hardcoded templates - Gemini AI is the only source for workout generation
+
+// Ensure workout_name is a single primary muscle group. If the model
+// returns combined names like "Chest & Triceps", expand into multiple
+// items (one per muscle) to keep names singular and consistent.
+function normalizeAndExpandWorkoutItems(items) {
+  const allowed = [
+    'chest', 'back', 'shoulders', 'legs', 'arms', 'core', 'biceps', 'triceps',
+    'cardio', 'pilates', 'stretching', 'abs', 'calves', 'forearms', 'traps', 'lats', 'delts', 'quads',
+    'hamstrings', 'obliques', 'full body', 'upper body', 'lower body', 'squat', 'deadlift'
+  ];
+  const title = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+  const detectMuscles = (name) => {
+    const lower = String(name || '').toLowerCase();
+    const hits = allowed.filter((m) => lower.includes(m));
+    if (hits.length) return [...new Set(hits)];
+    // Fallback: split on common delimiters and take first token
+    const first = lower.split(/[,/&\-]+/)[0].trim();
+    return first ? [first] : [];
+  };
+  const seen = new Set();
+  const result = [];
+  for (const item of items || []) {
+    const muscles = detectMuscles(item.workout_name);
+    if (muscles.length <= 1) {
+      const name = muscles[0] ? title(muscles[0]) : (item.workout_name || 'Workout');
+      const key = name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push({ ...item, workout_name: name });
+      }
+    } else {
+      for (const m of muscles) {
+        const name = title(m);
+        const key = name.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push({ ...item, workout_name: name });
+        }
+      }
+    }
+  }
+  return result;
 }
 
 // AI Plan Requests (input parameters)
@@ -67,6 +304,7 @@ exports.createRequest = async (req, res) => {
           })
           .returning('*');
 
+        // Only insert items if they are provided - no hardcoded generation here
         if (Array.isArray(items) && items.length) {
           const rows = items.map((it) => {
             const workoutName = coerceString(it.workout_name || it.name, 'Workout');
@@ -104,10 +342,10 @@ exports.createRequest = async (req, res) => {
 exports.updateRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const { exercise_plan, age, height_cm, weight_kg, gender, future_goal } = req.body;
+    const { exercise_plan, age, height_cm, weight_kg, gender, future_goal, user_level } = req.body;
     const existing = await db('app_ai_plan_requests').where({ id }).first();
     if (!existing) return res.status(404).json({ success: false, message: 'Request not found' });
-    const [updated] = await db('app_ai_plan_requests').where({ id }).update({ exercise_plan, age, height_cm, weight_kg, gender, future_goal, updated_at: new Date() }).returning('*');
+    const [updated] = await db('app_ai_plan_requests').where({ id }).update({ exercise_plan, age, height_cm, weight_kg, gender, future_goal, user_level, updated_at: new Date() }).returning('*');
     return res.json({ success: true, data: updated });
   } catch (err) {
     console.error('Error updating AI plan request:', err);
@@ -156,80 +394,138 @@ exports.listRequests = async (req, res) => {
 // AI Generated Plans (received plan)
 exports.createGeneratedPlan = async (req, res) => {
   try {
-    // Accept alternate field names from mobile to avoid 400s
+    // Handle the exact Flutter app payload structure
     const {
-      request_id: rawRequestId,
       user_id,
-      start_date: rawStart,
-      end_date: rawEnd,
+      gym_id,
       exercise_plan_category,
-      exercise_plan, // fallback name
+      start_date,
+      end_date,
+      age,
+      height_cm,
+      weight_kg,
+      gender,
+      future_goal,
+      user_level,
+      plan_duration_days,
       total_workouts,
       training_minutes,
-      total_training_minutes, // fallback name
       items = [],
-      plan: planPayload // support a nested { plan: {...} }
+      generate_items = true
     } = req.body;
 
-    const payload = planPayload && typeof planPayload === 'object' ? { ...planPayload, ...req.body } : req.body;
-    const gymId = req.user?.gym_id ?? null;
-    const resolvedCategory = coerceString(exercise_plan_category || exercise_plan || payload.exercise_plan_category || payload.exercise_plan);
-    const resolvedTrainingMinutes =
-      (typeof training_minutes === 'number' ? training_minutes : undefined) ??
-      (typeof total_training_minutes === 'number' ? total_training_minutes : undefined) ??
-      coerceNumber(payload.training_minutes ?? payload.total_training_minutes, 0);
-    const request_id = rawRequestId ?? null; // request_id is optional when posting generated plans directly
-
-    const start_date = coerceString(rawStart || payload.start_date);
-    const end_date = coerceString(rawEnd || payload.end_date);
-
-    if (!user_id || !start_date || !end_date || !resolvedCategory) {
-      return res.status(400).json({ success: false, message: 'user_id, start_date, end_date, and exercise_plan_category (or exercise_plan) are required' });
+    // Validate required fields
+    if (!user_id || !exercise_plan_category || !start_date || !end_date) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: user_id, exercise_plan_category, start_date, end_date'
+      });
     }
 
+    let generatedItems = [];
+    
+    if (generate_items && items.length === 0) {
+      console.log(`Generating workout items using Gemini AI for category: ${exercise_plan_category}`);
+      
+      try {
+        // Generate items using Gemini AI - this is the only method
+        generatedItems = await generateWorkoutItemsWithGemini({
+          exercise_plan_category,
+          start_date,
+          end_date,
+          age,
+          height_cm,
+          weight_kg,
+          gender,
+          future_goal,
+          user_level,
+          plan_duration_days
+        });
+        // Enforce single-muscle workout_name and expand combined labels
+        generatedItems = normalizeAndExpandWorkoutItems(generatedItems);
+        
+        console.log(`✅ Gemini AI generated ${generatedItems.length} workout items`);
+      } catch (geminiError) {
+        console.error('❌ Gemini AI generation failed:', geminiError.message);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to generate AI workout plan. Please ensure Gemini API is properly configured.'
+        });
+      }
+    } else if (items.length > 0) {
+      generatedItems = items;
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'No workout items provided and generate_items is false. Please provide items or set generate_items to true.'
+      });
+    }
+
+    // Calculate totals
+    const calculatedTotalWorkouts = generatedItems.length;
+    const calculatedTrainingMinutes = generatedItems.reduce((sum, item) => sum + (item.minutes || 0), 0);
+
+    // Use provided values or calculated values
+    const finalTotalWorkouts = total_workouts > 0 ? total_workouts : calculatedTotalWorkouts;
+    const finalTrainingMinutes = training_minutes > 0 ? training_minutes : calculatedTrainingMinutes;
+
+    // Create the plan in the database
     const [planRow] = await db('app_ai_generated_plans')
       .insert({
-        request_id,
         user_id,
-        gym_id: gymId,
+        gym_id: gym_id || req.user?.gym_id,
         start_date,
         end_date,
-        exercise_plan_category: resolvedCategory,
-        total_workouts: coerceNumber(total_workouts ?? payload.total_workouts, 0),
-        training_minutes: coerceNumber(resolvedTrainingMinutes, 0),
+        exercise_plan_category,
+        user_level: user_level || 'Beginner',
+        total_workouts: finalTotalWorkouts,
+        training_minutes: finalTrainingMinutes,
       })
       .returning('*');
 
-    const itemArray = Array.isArray(items) && items.length ? items : (Array.isArray(payload.items) ? payload.items : []);
-    if (itemArray.length) {
-      const rows = itemArray.map((it) => {
-        // Normalize common alternate item keys
-        const workoutName = coerceString(it.workout_name || it.name, 'Workout');
-        const weight = coerceNumber(it.weight_kg ?? it.weight, 0);
-        const minutes = coerceNumber(it.minutes ?? it.training_minutes, 0);
-        const exerciseTypes = Array.isArray(it.exercise_types)
-          ? it.exercise_types.map(String).join(', ')
-          : coerceString(it.exercise_types, undefined);
-          const row = {
-            plan_id: planRow.id,
-            workout_name: workoutName,
-            sets: coerceNumber(it.sets, 0),
-            reps: coerceNumber(it.reps, 0),
-            weight_kg: weight,
-            minutes,
-            user_level: it.user_level || 'Beginner',
-          };
-          if (exerciseTypes !== undefined) {
-            row.exercise_types = exerciseTypes;
-          }
-        return row;
+    // Insert the generated items into the database
+    if (generatedItems.length > 0) {
+      const rows = generatedItems.map((item) => {
+        return {
+          plan_id: planRow.id,
+          workout_name: item.workout_name,
+          sets: coerceNumber(item.sets, 0),
+          reps: coerceNumber(item.reps, 0),
+          weight_kg: coerceNumber(item.weight_kg, 0),
+          minutes: coerceNumber(item.minutes, 0),
+          exercise_types: coerceNumber(item.exercise_types, 0),
+          user_level: user_level || 'Beginner',
+        };
       });
-      if (rows.length) await db('app_ai_generated_plan_items').insert(rows);
+      
+      await db('app_ai_generated_plan_items').insert(rows);
     }
-    return res.status(201).json({ success: true, data: planRow });
+
+    // Return the response in the exact format expected by Flutter app
+    return res.status(201).json({
+      success: true,
+      data: {
+        id: planRow.id,
+        user_id,
+        gym_id: planRow.gym_id,
+        exercise_plan_category,
+        user_level: planRow.user_level || user_level || 'Beginner',
+        start_date: new Date(planRow.start_date).toISOString(),
+        end_date: new Date(planRow.end_date).toISOString(),
+        total_workouts: finalTotalWorkouts,
+        training_minutes: finalTrainingMinutes,
+        items: generatedItems,
+        created_at: planRow.created_at,
+        updated_at: planRow.updated_at
+      }
+    });
+
   } catch (err) {
     console.error('Error creating AI generated plan:', err);
-    return res.status(500).json({ success: false, message: 'Failed to create AI generated plan' });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to generate AI plan'
+    });
   }
 };
 

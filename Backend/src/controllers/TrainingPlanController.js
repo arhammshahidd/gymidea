@@ -672,11 +672,11 @@ exports.updateAssignment = async (req, res, next) => {
       filteredUpdateData.reps = filteredUpdateData.reps === '' ? 0 : parseInt(filteredUpdateData.reps) || 0;
     }
     if (filteredUpdateData.weight_kg !== undefined) {
-      filteredUpdateData.weight_kg = filteredUpdateData.weight_kg === '' ? '' : filteredUpdateData.weight_kg.toString();
+      filteredUpdateData.weight_kg = filteredUpdateData.weight_kg === '' ? 0 : parseFloat(filteredUpdateData.weight_kg) || 0;
     }
 
     // Final validation - ensure no empty strings in numeric fields
-    const numericFields = ['total_workouts', 'total_exercises', 'training_minutes', 'sets', 'reps'];
+    const numericFields = ['total_workouts', 'total_exercises', 'training_minutes', 'sets', 'reps', 'weight_kg'];
     numericFields.forEach(field => {
       if (filteredUpdateData[field] === '' || filteredUpdateData[field] === null || filteredUpdateData[field] === undefined) {
         filteredUpdateData[field] = 0;

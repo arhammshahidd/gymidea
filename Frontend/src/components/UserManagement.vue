@@ -1,10 +1,10 @@
 <template>
   <div class="user-management">
     <!-- Header Section -->
-    <q-card class="header-card q-mb-lg" elevated>
+    <q-card class="header-card q-mb-lg" elevated :style="{ color: '#DF8A35' }">
       <q-card-section class="q-pa-lg">
         <div class="row items-center justify-between">
-          <div class="header-content">
+          <div class="header-content ">
             <div class="text-h4 text-weight-bold text-primary q-mb-xs">User Management</div>
             <div class="text-subtitle1 text-grey-6">Manage your gym members and their information</div>
           </div>
@@ -33,15 +33,15 @@
         <q-card-section class="q-pa-lg">
           <div class="row items-center no-wrap">
             <q-avatar 
-              :color="card.iconColor" 
+              :style="{ backgroundColor: card.iconColor, border: '2px solid #DF8A35' }"
               text-color="white" 
               :icon="card.icon" 
               size="48px"
               class="q-mr-md"
             />
             <div class="stat-content">
-              <div class="text-caption text-weight-medium text-grey-6 q-mb-xs">{{ card.label }}</div>
-              <div class="text-h4 text-weight-bold">{{ card.value }}</div>
+              <div class="text-caption text-weight-medium q-mb-xs" style="color: black !important;">{{ card.label }}</div>
+              <div class="text-h4 text-weight-bold" style="color: black !important;">{{ card.value }}</div>
             </div>
           </div>
         </q-card-section>
@@ -55,8 +55,8 @@
         <q-card-section class="q-pa-lg">
           <div class="row items-center q-col-gutter-lg">
             <div class="col-12 col-md-4">
-              <div class="text-h6 text-weight-bold text-primary q-mb-sm">Users List</div>
-              <div class="text-caption text-grey-6" v-if="userStore.loading">
+              <div class="text-h6 text-weight-bold q-mb-sm" style="color: black !important;">Users List</div>
+              <div class="text-caption" v-if="userStore.loading" style="color: black !important;">
                 <q-spinner-dots size="16px" class="q-mr-sm" />
                 Loading users...
               </div>
@@ -70,7 +70,7 @@
                 clearable
               >
                 <template v-slot:prepend>
-                  <q-icon name="search" color="primary" />
+                  <q-icon name="search" color="brown" />
                 </template>
               </q-input>
             </div>
@@ -117,8 +117,8 @@
       <q-card v-if="!userStore.loading && userStore.users.length === 0" class="empty-state-card q-mb-lg" elevated>
         <q-card-section class="text-center q-pa-xl">
           <q-icon name="people_outline" size="64px" color="grey-5" class="q-mb-md" />
-          <div class="text-h6 text-grey-7 q-mb-sm">No users found</div>
-          <div class="text-body2 text-grey-6 q-mb-lg">Create your first user to get started!</div>
+          <div class="text-h6 q-mb-sm" style="color: black !important;">No users found</div>
+          <div class="text-body2 q-mb-lg" style="color: black !important;">Create your first user to get started!</div>
           <q-btn color="primary" label="Add New User" icon="person_add" @click="showCreateUser = true" />
         </q-card-section>
       </q-card>
@@ -150,20 +150,20 @@
                 <q-avatar size="32px" color="primary" text-color="white" class="q-mr-sm">
                   {{ props.row.name ? props.row.name.charAt(0).toUpperCase() : 'U' }}
                 </q-avatar>
-                <span class="text-weight-medium">{{ props.row.name || 'N/A' }}</span>
+                <span class="text-weight-medium" style="color: black !important;">{{ props.row.name || 'N/A' }}</span>
               </div>
             </q-td>
           </template>
           
           <template v-slot:body-cell-email="props">
             <q-td :props="props">
-              <div class="text-body2">{{ props.row.email || 'N/A' }}</div>
+              <div class="text-body2" style="color: black !important;">{{ props.row.email || 'N/A' }}</div>
             </q-td>
           </template>
           
           <template v-slot:body-cell-phone="props">
             <q-td :props="props">
-              <div class="text-body2">{{ props.row.phone || 'N/A' }}</div>
+              <div class="text-body2" style="color: black !important;">{{ props.row.phone || 'N/A' }}</div>
             </q-td>
           </template>
           
@@ -256,35 +256,35 @@
     <!-- Create/Edit User Modal -->
     <q-dialog v-model="showCreateUser">
       <q-card style="min-width: 500px">
-        <q-card-section class="text-h6">Add New User</q-card-section>
+        <q-card-section class="text-h6" style="color: black !important;">Add New User</q-card-section>
         <q-card-section>
           <form @submit.prevent="handleSubmit">
           <div class="form-group">
-            <label>Name:</label>
+            <label style="color: black !important;">Name:</label>
             <input v-model="userForm.name" type="text" required />
           </div>
           <div class="form-group">
-            <label>Email:</label>
+            <label style="color: black !important;">Email:</label>
             <input v-model="userForm.email" type="email" required />
           </div>
           <div class="form-group">
-            <label>Phone:</label>
+            <label style="color: black !important;">Phone:</label>
             <input v-model="userForm.phone" type="text" required />
           </div>
           <div class="form-group">
-            <label>Password:</label>
+            <label style="color: black !important;">Password:</label>
             <input v-model="userForm.password" type="password" :required="showCreateUser" />
-            <small v-if="showEditUser">Leave empty to keep current password</small>
+            <small v-if="showEditUser" style="color: black !important;">Leave empty to keep current password</small>
           </div>
           <div class="form-group">
-            <label>Status:</label>
+            <label style="color: black !important;">Status:</label>
             <select v-model="userForm.status">
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Membership:</label>
+            <label style="color: black !important;">Membership:</label>
             <select v-model="userForm.membership_tier">
               <option value="BASIC">Basic</option>
               <option value="PREMIUM">Premium</option>
@@ -301,35 +301,35 @@
 
     <q-dialog v-model="showEditUser">
       <q-card style="min-width: 500px">
-        <q-card-section class="text-h6">Edit User</q-card-section>
+        <q-card-section class="text-h6" style="color: black !important;">Edit User</q-card-section>
         <q-card-section>
           <form @submit.prevent="handleSubmit">
             <div class="form-group">
-              <label>Name:</label>
+              <label style="color: black !important;">Name:</label>
               <input v-model="userForm.name" type="text" required />
             </div>
             <div class="form-group">
-              <label>Email:</label>
+              <label style="color: black !important;">Email:</label>
               <input v-model="userForm.email" type="email" required />
             </div>
             <div class="form-group">
-              <label>Phone:</label>
+              <label style="color: black !important;">Phone:</label>
               <input v-model="userForm.phone" type="text" required />
             </div>
             <div class="form-group">
-              <label>Password:</label>
+              <label style="color: black !important;">Password:</label>
               <input v-model="userForm.password" type="password" />
-              <small>Leave empty to keep current password</small>
+              <small style="color: black !important;">Leave empty to keep current password</small>
             </div>
             <div class="form-group">
-              <label>Status:</label>
+              <label style="color: black !important;">Status:</label>
               <select v-model="userForm.status">
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
               </select>
             </div>
             <div class="form-group">
-              <label>Membership:</label>
+              <label style="color: black !important;">Membership:</label>
               <select v-model="userForm.membership_tier">
                 <option value="BASIC">Basic</option>
                 <option value="PREMIUM">Premium</option>
@@ -377,35 +377,35 @@ const statCards = computed(() => [
     label: 'Total Users', 
     value: userStore.stats?.totalUsers || 0,
     icon: 'people',
-    iconColor: 'primary',
+    iconColor: '#DF8A35',
     color: 'stat-card-primary'
   },
   { 
     label: 'Active Users', 
     value: userStore.stats?.totalActiveUsers || 0,
     icon: 'check_circle',
-    iconColor: 'positive',
+    iconColor: '#DF8A35',
     color: 'stat-card-success'
   },
   { 
     label: 'Inactive Users', 
     value: userStore.stats?.totalInactiveUsers || 0,
     icon: 'cancel',
-    iconColor: 'negative',
+    iconColor: '#DF8A35',
     color: 'stat-card-danger'
   },
   { 
     label: 'Basic Members', 
     value: userStore.stats?.totalBasicMemberships || 0,
     icon: 'person',
-    iconColor: 'info',
+    iconColor: '#DF8A35',
     color: 'stat-card-info'
   },
   { 
     label: 'Premium Members', 
     value: userStore.stats?.totalPremiumMemberships || 0,
     icon: 'star',
-    iconColor: 'amber',
+    iconColor: '#DF8A35',
     color: 'stat-card-warning'
   }
 ])
@@ -547,7 +547,7 @@ const deleteUser = async (userId) => {
 
 /* Header Card Styling */
 .header-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #DF8A35 100%, #764ba2 0%);
   border: none;
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
@@ -605,7 +605,7 @@ const deleteUser = async (userId) => {
   left: 0;
   right: 0;
   height: 4px;
-  background: linear-gradient(90deg, var(--accent-color, #667eea), var(--accent-color-light, #764ba2));
+  background: linear-gradient(90deg, var(--accent-color, black), var(--accent-color-light, #764ba2));
 }
 
 .stat-card:hover {
@@ -614,43 +614,41 @@ const deleteUser = async (userId) => {
 }
 
 .stat-card-primary {
-  --accent-color: #667eea;
-  --accent-color-light: #764ba2;
+  --accent-color: #DF8A35;
+  --accent-color-light: #DF8A35;
 }
 
 .stat-card-success {
-  --accent-color: #4caf50;
-  --accent-color-light: #8bc34a;
+  --accent-color: #DF8A35;
+  --accent-color-light: #DF8A35;
 }
 
 .stat-card-danger {
-  --accent-color: #f44336;
-  --accent-color-light: #ff7043;
+  --accent-color: #DF8A35;
+  --accent-color-light: #DF8A35;
 }
 
 .stat-card-info {
-  --accent-color: #2196f3;
-  --accent-color-light: #03a9f4;
+  --accent-color: #DF8A35;
+  --accent-color-light: #DF8A35;
 }
 
 .stat-card-warning {
-  --accent-color: #ff9800;
-  --accent-color-light: #ffc107;
+  --accent-color: #DF8A35;
+  --accent-color-light: #DF8A35;
 }
 
 .stat-content .text-caption {
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+  color: black !important;
 }
 
 .stat-content .text-h4 {
   margin-top: 8px;
   font-weight: 700;
-  background: linear-gradient(135deg, var(--accent-color), var(--accent-color-light));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: black !important;
 }
 
 /* Filters Card */

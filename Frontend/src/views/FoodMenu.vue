@@ -4,8 +4,8 @@
     <q-card class="header-card q-mb-lg" elevated>
       <q-card-section class="q-pa-lg">
         <div class="header-content">
-          <div class="text-h4 text-weight-bold text-primary q-mb-xs">Food Menu Management</div>
-          <div class="text-subtitle1 text-grey-6">Manage nutrition plans and food menus for your gym members</div>
+          <div class="text-h4 text-weight-bold q-mb-xs" style="color: white !important;">Food Menu Management</div>
+          <div class="text-subtitle1" style="color: white !important;">Manage nutrition plans and food menus for your gym members</div>
         </div>
       </q-card-section>
     </q-card>
@@ -15,8 +15,8 @@
       <q-card-section class="q-pa-lg">
         <div class="row items-center justify-between q-mb-lg">
           <div class="section-header">
-            <div class="text-h6 text-weight-bold text-primary q-mb-sm">User List</div>
-            <div class="text-caption text-grey-6">Select users to create or manage their food menus</div>
+            <div class="text-h6 text-weight-bold q-mb-sm" style="color: black !important;">User List</div>
+            <div class="text-caption" style="color: black !important;">Select users to create or manage their food menus</div>
           </div>
           <div class="search-container">
             <q-input
@@ -27,7 +27,7 @@
               class="search-input"
             >
               <template v-slot:prepend>
-                <q-icon name="search" color="primary" />
+                <q-icon name="search" :style="{ color: '#DF8A35' }" />
               </template>
             </q-input>
           </div>
@@ -55,23 +55,23 @@
           <template v-slot:body-cell-name="props">
             <q-td :props="props">
               <div class="user-name-cell">
-                <q-avatar size="32px" color="primary" text-color="white" class="q-mr-sm">
+                <q-avatar size="32px" :style="{ backgroundColor: '#DF8A35', border: '2px solid #DF8A35' }" text-color="white" class="q-mr-sm">
                   {{ props.row.name ? props.row.name.charAt(0).toUpperCase() : 'U' }}
                 </q-avatar>
-                <span class="text-weight-medium">{{ props.row.name || 'N/A' }}</span>
+                <span class="text-weight-medium" style="color: black !important;">{{ props.row.name || 'N/A' }}</span>
               </div>
             </q-td>
           </template>
           
           <template v-slot:body-cell-email="props">
             <q-td :props="props">
-              <div class="text-body2">{{ props.row.email || 'N/A' }}</div>
+              <div class="text-body2" style="color: black !important;">{{ props.row.email || 'N/A' }}</div>
             </q-td>
           </template>
           
           <template v-slot:body-cell-contact="props">
             <q-td :props="props">
-              <div class="text-body2">{{ props.row.phone || 'N/A' }}</div>
+              <div class="text-body2" style="color: black !important;">{{ props.row.phone || 'N/A' }}</div>
             </q-td>
           </template>
 
@@ -135,8 +135,8 @@
       <q-card-section class="q-pa-lg">
         <div class="row items-center justify-between q-mb-lg">
           <div class="section-header">
-            <div class="text-h6 text-weight-bold text-primary q-mb-sm">Planned Nutrition</div>
-            <div class="text-caption text-grey-6">Create and manage nutrition plans for your members</div>
+            <div class="text-h6 text-weight-bold q-mb-sm" style="color: black !important;">Planned Nutrition</div>
+            <div class="text-caption" style="color: black !important;">Create and manage nutrition plans for your members</div>
           </div>
           <q-btn
             color="primary"
@@ -152,7 +152,7 @@
         <!-- Assign Plan to User -->
         <q-card class="assign-plan-card q-mb-lg" flat bordered>
           <q-card-section class="q-pa-lg">
-            <div class="text-h6 text-weight-bold text-primary q-mb-md">Assign Nutrition Plan to User</div>
+            <div class="text-h6 text-weight-bold q-mb-md" style="color: black !important;">Assign Nutrition Plan to User</div>
             <div class="assign-form">
               <div class="row q-col-gutter-md q-mb-md">
                 <div class="col-12 col-md-6">
@@ -171,7 +171,7 @@
                     @filter="filterUsers"
                   >
                     <template v-slot:prepend>
-                      <q-icon name="person_search" color="primary" />
+                      <q-icon name="person_search" :style="{ color: '#DF8A35' }" />
                     </template>
                   </q-select>
                 </div>
@@ -188,7 +188,7 @@
                     map-options
                   >
                     <template v-slot:prepend>
-                      <q-icon name="restaurant_menu" color="primary" />
+                      <q-icon name="restaurant_menu" :style="{ color: '#DF8A35' }" />
                     </template>
                   </q-select>
                 </div>
@@ -235,8 +235,8 @@
             <q-card-section class="nutrition-card-header">
               <div class="row items-center justify-between">
                 <div class="plan-title">
-                  <div class="text-h6 text-weight-bold text-primary">{{ plan.menu_plan_category }} Plan</div>
-                  <div class="text-caption text-grey-6">Nutrition Plan</div>
+                  <div class="text-h6 text-weight-bold" style="color: black !important;">{{ plan.menu_plan_category }} Plan</div>
+                  <div class="text-caption" style="color: black !important;">Nutrition Plan</div>
                 </div>
                 <q-badge 
                   :color="plan.status === 'ACTIVE' ? 'positive' : 'warning'" 
@@ -257,37 +257,37 @@
                   <div class="col-12 col-sm-4">
                     <div class="detail-item">
                       <q-icon name="event" color="primary" size="16px" class="q-mr-xs" />
-                      <span class="text-caption text-grey-6">Start Date</span>
-                      <div class="text-body2 text-weight-medium">{{ formatDate(plan.start_date) }}</div>
+                      <span class="text-caption" style="color: black !important;">Start Date</span>
+                      <div class="text-body2 text-weight-medium" style="color: black !important;">{{ formatDate(plan.start_date) }}</div>
                     </div>
                   </div>
                   <div class="col-12 col-sm-4">
                     <div class="detail-item">
                       <q-icon name="event_available" color="primary" size="16px" class="q-mr-xs" />
-                      <span class="text-caption text-grey-6">End Date</span>
-                      <div class="text-body2 text-weight-medium">{{ formatDate(plan.end_date) }}</div>
+                      <span class="text-caption" style="color: black !important;">End Date</span>
+                      <div class="text-body2 text-weight-medium" style="color: black !important;">{{ formatDate(plan.end_date) }}</div>
                     </div>
                   </div>
                   <div class="col-12 col-sm-4">
                     <div class="detail-item">
                       <q-icon name="schedule" color="primary" size="16px" class="q-mr-xs" />
-                      <span class="text-caption text-grey-6">Duration</span>
-                      <div class="text-body2 text-weight-medium">{{ calculateDuration(plan.start_date, plan.end_date) }} days</div>
+                      <span class="text-caption" style="color: black !important;">Duration</span>
+                      <div class="text-body2 text-weight-medium" style="color: black !important;">{{ calculateDuration(plan.start_date, plan.end_date) }} days</div>
                     </div>
                   </div>
                 </div>
               </div>
               
               <div class="nutrition-summary">
-                <div class="text-subtitle2 text-weight-bold text-primary q-mb-md">Nutrition Summary</div>
+                <div class="text-subtitle2 text-weight-bold q-mb-md" style="color: black !important;">Nutrition Summary</div>
                 <div class="nutrition-grid">
                   <div class="nutrition-item">
                     <div class="nutrition-icon">
-                      <q-icon name="local_fire_department" color="orange" size="24px" />
+                      <q-icon name="local_fire_department" :style="{ color: '#DF8A35' }" size="24px" />
                     </div>
                     <div class="nutrition-content">
                       <div class="nutrition-label">Calories</div>
-                      <div class="nutrition-value text-orange">
+                      <div class="nutrition-value" style="color: black !important;">
                         <span class="nutrition-number">{{ Number(plan.total_daily_calories || 0).toFixed(0) }}</span>
                         <span class="nutrition-unit">kcal</span>
                       </div>
@@ -295,11 +295,11 @@
                   </div>
                   <div class="nutrition-item">
                     <div class="nutrition-icon">
-                      <q-icon name="fitness_center" color="green" size="24px" />
+                      <q-icon name="fitness_center" :style="{ color: '#DF8A35' }" size="24px" />
                     </div>
                     <div class="nutrition-content">
                       <div class="nutrition-label">Protein</div>
-                      <div class="nutrition-value text-green">
+                      <div class="nutrition-value" style="color: black !important;">
                         <span class="nutrition-number">{{ Number(plan.total_daily_protein || 0).toFixed(0) }}</span>
                         <span class="nutrition-unit">g</span>
                       </div>
@@ -307,11 +307,11 @@
                   </div>
                   <div class="nutrition-item">
                     <div class="nutrition-icon">
-                      <q-icon name="grain" color="amber" size="24px" />
+                      <q-icon name="grain" :style="{ color: '#DF8A35' }" size="24px" />
                     </div>
                     <div class="nutrition-content">
                       <div class="nutrition-label">Carbs</div>
-                      <div class="nutrition-value text-amber">
+                      <div class="nutrition-value" style="color: black !important;">
                         <span class="nutrition-number">{{ Number(plan.total_daily_carbs || 0).toFixed(0) }}</span>
                         <span class="nutrition-unit">g</span>
                       </div>
@@ -319,11 +319,11 @@
                   </div>
                   <div class="nutrition-item">
                     <div class="nutrition-icon">
-                      <q-icon name="opacity" color="purple" size="24px" />
+                      <q-icon name="opacity" :style="{ color: '#DF8A35' }" size="24px" />
                     </div>
                     <div class="nutrition-content">
                       <div class="nutrition-label">Fats</div>
-                      <div class="nutrition-value text-purple">
+                      <div class="nutrition-value" style="color: black !important;">
                         <span class="nutrition-number">{{ Number(plan.total_daily_fats || 0).toFixed(0) }}</span>
                         <span class="nutrition-unit">g</span>
                       </div>
@@ -2416,7 +2416,7 @@ const deleteAssignmentPlan = async (assignmentId) => {
 
 /* Header Card Styling */
 .header-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #DF8A35 100%, #000000 0%);
   border: none;
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);

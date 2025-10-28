@@ -232,7 +232,7 @@
         
         <!-- User Cards Grid -->
         <div class="user-cards-grid">
-          <template v-for="(card, index) in filteredUserCards" :key="card?.id || index">
+          <template v-for="(card, index) in paginatedUserCards" :key="card?.id || index">
             <div 
               v-if="card && card.id"
               class="user-card-wrapper"
@@ -360,6 +360,27 @@
               </q-card>
             </div>
           </template>
+        </div>
+
+        <!-- Pagination for Payment Records -->
+        <div v-if="filteredUserCards.length > 0" class="payment-pagination q-mt-lg">
+          <q-pagination
+            v-model="currentPaymentPage"
+            :max="totalPaymentPages"
+            :max-pages="5"
+            direction-links
+            boundary-links
+            color="primary"
+            size="md"
+            class="payment-pagination-controls"
+          />
+          <div class="payment-pagination-info">
+            <span class="text-caption">
+              Showing {{ (currentPaymentPage - 1) * paymentsPerPage + 1 }} to 
+              {{ Math.min(currentPaymentPage * paymentsPerPage, filteredUserCards.length) }} 
+              of {{ filteredUserCards.length }} payment records
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -585,6 +606,10 @@ const paymentRecords = ref([])
 const users = ref([])
 const userCards = ref([])
 
+// Pagination for payment records
+const currentPaymentPage = ref(1)
+const paymentsPerPage = ref(6)
+
 // Overview data
 const overviewData = ref({
   totalMembers: 0,
@@ -739,6 +764,17 @@ const filteredUserCards = computed(() => {
     console.error('Error filtering user cards:', error)
     return []
   }
+})
+
+// Pagination computed properties
+const totalPaymentPages = computed(() => {
+  return Math.ceil(filteredUserCards.value.length / paymentsPerPage.value)
+})
+
+const paginatedUserCards = computed(() => {
+  const start = (currentPaymentPage.value - 1) * paymentsPerPage.value
+  const end = start + paymentsPerPage.value
+  return filteredUserCards.value.slice(start, end)
 })
 
 // Methods
@@ -2160,6 +2196,64 @@ onMounted(async () => {
   .amount-section,
   .payment-info {
     padding: 12px;
+  }
+}
+
+/* Payment Pagination Styles */
+.payment-pagination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.payment-pagination-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.payment-pagination-info {
+  text-align: center;
+  color: #6c757d;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Responsive pagination styles */
+@media (max-width: 768px) {
+  .payment-pagination {
+    padding: 16px;
+    margin-top: 20px;
+  }
+  
+  .payment-pagination-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  
+  .payment-pagination-info {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  .payment-pagination {
+    padding: 12px;
+    margin-top: 16px;
+  }
+  
+  .payment-pagination-controls {
+    gap: 4px;
+  }
+  
+  .payment-pagination-info {
+    font-size: 12px;
   }
 }
 </style>

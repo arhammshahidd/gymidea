@@ -1,36 +1,39 @@
 const db = require('../config/db');
+const { getUserProgressForPlan, smartUpdateMobilePlanItems, smartUpdateManualPlanItems } = require('../utils/smartPlanUpdates');
 
 // Helper function to create daily plans from training plan
-async function createDailyTrainingPlansFromPlan(plan, items, user_id, gym_id) {
+exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPlansFromPlan(plan, items, user_id, gym_id) {
   try {
     const startDate = new Date(plan.start_date);
     const endDate = new Date(plan.end_date);
-    const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
+    
+    // Use the same distribution logic as the portal
+    const { createDistributedPlan } = require('../utils/exerciseDistribution');
+    const distributedPlan = createDistributedPlan(
+      { items },
+      startDate,
+      endDate
+    );
     
     const dailyPlans = [];
     
-    for (let i = 0; i < totalDays; i++) {
-      const planDate = new Date(startDate);
-      planDate.setDate(startDate.getDate() + i);
-      const dateStr = planDate.toISOString().split('T')[0];
-      
-      // Distribute items across days
-      const itemsPerDay = Math.ceil(items.length / totalDays);
-      const dayItems = items.slice(i * itemsPerDay, (i + 1) * itemsPerDay);
+    // Convert distributed daily plans to mobile format
+    for (const dayPlan of distributedPlan.daily_plans) {
+      const dayItems = dayPlan.workouts || [];
       
       const totalSets = dayItems.reduce((sum, item) => sum + (item.sets || 0), 0);
       const totalReps = dayItems.reduce((sum, item) => sum + (item.reps || 0), 0);
       const totalWeight = dayItems.reduce((sum, item) => sum + (item.weight_kg || 0), 0);
-      const totalMinutes = dayItems.reduce((sum, item) => sum + (item.minutes || 0), 0);
+      const totalMinutes = dayItems.reduce((sum, item) => sum + (item.training_minutes || item.minutes || 0), 0);
       
       dailyPlans.push({
         user_id,
         gym_id,
-        plan_date: dateStr,
+        plan_date: dayPlan.date,
         plan_type: 'manual',
         source_plan_id: plan.id,
         plan_category: plan.exercise_plan_category,
-        workout_name: dayItems[0]?.workout_name || 'Daily Workout',
+        workout_name: dayItems[0]?.workout_name || dayItems[0]?.name || 'Daily Workout',
         total_exercises: dayItems.length,
         training_minutes: totalMinutes,
         total_sets: totalSets,
@@ -131,21 +134,16 @@ exports.updatePlan = async (req, res) => {
       .returning('*');
 
     if (Array.isArray(items)) {
-      await db('app_manual_training_plan_items').where({ plan_id: id }).del();
-      if (items.length) {
-        const rows = items.map((it) => ({
-          plan_id: id,
-          workout_name: it.workout_name,
-          exercise_plan_category: it.exercise_plan_category || null,
-          exercise_types: it.exercise_types || null,
-          sets: it.sets || 0,
-          reps: it.reps || 0,
-          weight_kg: it.weight_kg || 0,
-          minutes: it.minutes || 0,
-          user_level: it.user_level || 'Beginner',
-        }));
-        await db('app_manual_training_plan_items').insert(rows);
-      }
+      console.log(`📱 Smart updating Manual Training Plan ${id} with ${items.length} exercises`);
+      
+      // Get user's progress to determine which workouts are completed
+      const userProgress = await getUserProgressForPlan(existing.user_id, id);
+      const today = new Date().toISOString().split('T')[0];
+      
+      console.log(`📊 Manual Plan user progress: ${userProgress.completedDays} completed days, today: ${today}`);
+      
+      // Only update future workouts, preserve completed ones
+      await smartUpdateManualPlanItems(id, items, userProgress, today);
     }
 
     return res.json({ success: true, data: updated });

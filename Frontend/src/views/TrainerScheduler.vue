@@ -33,7 +33,7 @@
 
       <div class="training-cards-grid">
         <q-card
-          v-for="ap in filteredApprovals"
+          v-for="ap in paginatedApprovals"
           :key="ap.id"
           class="training-card"
           elevated
@@ -120,6 +120,27 @@
             </q-card-actions>
           </q-card>
             </div>
+
+        <!-- Pagination for Approvals -->
+        <div v-if="filteredApprovals.length > 0" class="approval-pagination q-mt-lg">
+          <q-pagination
+            v-model="currentApprovalPage"
+            :max="totalApprovalPages"
+            :max-pages="5"
+            direction-links
+            boundary-links
+            color="primary"
+            size="md"
+            class="approval-pagination-controls"
+          />
+          <div class="approval-pagination-info">
+            <span class="text-caption">
+              Showing {{ (currentApprovalPage - 1) * approvalsPerPage + 1 }} to 
+              {{ Math.min(currentApprovalPage * approvalsPerPage, filteredApprovals.length) }} 
+              of {{ filteredApprovals.length }} approvals
+            </span>
+          </div>
+        </div>
 
         <q-card v-if="filteredApprovals.length === 0" class="empty-state-card" elevated>
           <q-card-section class="text-center q-pa-xl">
@@ -438,7 +459,7 @@
 
       <div class="training-cards-grid">
         <q-card
-          v-for="plan in allTrainingPlans"
+          v-for="plan in paginatedTrainingPlans"
           :key="plan.id"
             class="training-plan-card"
             elevated
@@ -527,6 +548,27 @@
         </q-card>
       </div>
 
+      <!-- Pagination for Training Plans -->
+      <div v-if="allTrainingPlans.length > 0" class="training-plans-pagination q-mt-lg">
+        <q-pagination
+          v-model="currentTrainingPlansPage"
+          :max="totalTrainingPlansPages"
+          :max-pages="5"
+          direction-links
+          boundary-links
+          color="primary"
+          size="md"
+          class="training-plans-pagination-controls"
+        />
+        <div class="training-plans-pagination-info">
+          <span class="text-caption">
+            Showing {{ (currentTrainingPlansPage - 1) * trainingPlansPerPage + 1 }} to 
+            {{ Math.min(currentTrainingPlansPage * trainingPlansPerPage, allTrainingPlans.length) }} 
+            of {{ allTrainingPlans.length }} training plans
+          </span>
+        </div>
+      </div>
+
         <q-card v-if="allTrainingPlans.length === 0" class="empty-state-card" elevated>
           <q-card-section class="text-center q-pa-xl">
             <q-icon name="fitness_center" size="64px" color="grey-5" class="q-mb-md" />
@@ -558,7 +600,7 @@
 
        <div class="training-cards-grid">
          <q-card
-           v-for="plan in myAssignments"
+           v-for="plan in paginatedAssignments"
            :key="plan.id"
            class="training-card assignment-card"
            elevated
@@ -613,6 +655,13 @@
                       <div class="text-body2 text-weight-medium">{{ formatDate(plan.end_date) }}</div>
                     </div>
                   </div>
+                  <div class="col-12 col-sm-6" v-if="plan.assigned_by_trainer">
+                    <div class="detail-item">
+                      <q-icon name="person_add" color="primary" size="16px" class="q-mr-xs" />
+                      <span class="text-caption text-grey-6">Assigned By</span>
+                      <div class="text-body2 text-weight-medium">{{ plan.assigned_by_trainer.name }}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </q-card-section>
@@ -651,6 +700,27 @@
             </q-card-actions>
           </q-card>
              </div>
+
+        <!-- Pagination for Assignments -->
+        <div v-if="myAssignments.length > 0" class="assignment-pagination q-mt-lg">
+          <q-pagination
+            v-model="currentAssignmentPage"
+            :max="totalAssignmentPages"
+            :max-pages="5"
+            direction-links
+            boundary-links
+            color="primary"
+            size="md"
+            class="assignment-pagination-controls"
+          />
+          <div class="assignment-pagination-info">
+            <span class="text-caption">
+              Showing {{ (currentAssignmentPage - 1) * assignmentsPerPage + 1 }} to 
+              {{ Math.min(currentAssignmentPage * assignmentsPerPage, myAssignments.length) }} 
+              of {{ myAssignments.length }} assignments
+            </span>
+          </div>
+        </div>
 
         <q-card v-if="myAssignments.length === 0" class="empty-state-card" elevated>
           <q-card-section class="text-center q-pa-xl">
@@ -1514,6 +1584,45 @@ const newExercise = ref({
   reps: 0,
   weight_kg: '',
   minutes: 0
+})
+
+// Pagination variables
+const currentApprovalPage = ref(1)
+const approvalsPerPage = ref(6)
+const currentAssignmentPage = ref(1)
+const assignmentsPerPage = ref(6)
+const currentTrainingPlansPage = ref(1)
+const trainingPlansPerPage = ref(6)
+
+// Pagination computed properties
+const totalApprovalPages = computed(() => {
+  return Math.ceil(filteredApprovals.value.length / approvalsPerPage.value)
+})
+
+const paginatedApprovals = computed(() => {
+  const start = (currentApprovalPage.value - 1) * approvalsPerPage.value
+  const end = start + approvalsPerPage.value
+  return filteredApprovals.value.slice(start, end)
+})
+
+const totalAssignmentPages = computed(() => {
+  return Math.ceil(myAssignments.value.length / assignmentsPerPage.value)
+})
+
+const paginatedAssignments = computed(() => {
+  const start = (currentAssignmentPage.value - 1) * assignmentsPerPage.value
+  const end = start + assignmentsPerPage.value
+  return myAssignments.value.slice(start, end)
+})
+
+const totalTrainingPlansPages = computed(() => {
+  return Math.ceil(allTrainingPlans.value.length / trainingPlansPerPage.value)
+})
+
+const paginatedTrainingPlans = computed(() => {
+  const start = (currentTrainingPlansPage.value - 1) * trainingPlansPerPage.value
+  const end = start + trainingPlansPerPage.value
+  return allTrainingPlans.value.slice(start, end)
 })
 
 // Computed properties
@@ -3080,6 +3189,68 @@ onMounted(async () => {
   
   .action-btn {
     width: 100%;
+  }
+}
+
+/* Pagination Styles */
+.approval-pagination,
+.assignment-pagination,
+.training-plans-pagination {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  margin-top: 24px;
+}
+
+.approval-pagination-controls,
+.assignment-pagination-controls,
+.training-plans-pagination-controls {
+  display: flex;
+  justify-content: center;
+}
+
+.approval-pagination-info,
+.assignment-pagination-info,
+.training-plans-pagination-info {
+  text-align: center;
+  color: #6c757d;
+  font-weight: 500;
+}
+
+/* Responsive Pagination */
+@media (max-width: 768px) {
+  .approval-pagination,
+  .assignment-pagination,
+  .training-plans-pagination {
+    padding: 16px;
+    gap: 12px;
+  }
+  
+  .approval-pagination-controls,
+  .assignment-pagination-controls,
+  .training-plans-pagination-controls {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .approval-pagination,
+  .assignment-pagination,
+  .training-plans-pagination {
+    padding: 12px;
+    gap: 8px;
+  }
+  
+  .approval-pagination-info,
+  .assignment-pagination-info,
+  .training-plans-pagination-info {
+    font-size: 0.8rem;
   }
 }
 </style>

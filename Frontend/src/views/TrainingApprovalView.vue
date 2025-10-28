@@ -159,8 +159,127 @@
       <!-- Card 3: Daily Plans -->
       <q-card class="q-mb-md daily-plans-card">
         <q-card-section>
-          <div class="text-h6 q-mb-md">Daily Plans</div>
-          <div class="days-grid">
+          <div class="row items-center justify-between q-mb-md">
+            <div class="text-h6">Daily Plans</div>
+            <div class="daily-plans-actions">
+              <q-btn 
+                color="primary" 
+                icon="visibility" 
+                label="View All Days" 
+                @click="loadDailyPlans"
+                :loading="loadingDailyPlans"
+                class="q-mr-sm"
+                unelevated
+              />
+              <q-btn 
+                color="negative" 
+                icon="delete" 
+                label="Remove All Days" 
+                @click="confirmDeleteDailyPlans"
+                :loading="deletingDailyPlans"
+                unelevated
+              />
+            </div>
+          </div>
+          
+          <!-- Daily Plans Summary -->
+          <div v-if="dailyPlansData" class="daily-plans-summary q-mb-md">
+            <q-banner class="bg-blue-1" rounded>
+              <template v-slot:avatar>
+                <q-icon name="calendar_today" color="primary" />
+              </template>
+              <div class="text-subtitle2">Daily Plans Summary</div>
+              <div class="text-body2">
+                Total Days: {{ dailyPlansData.total_days }} | 
+                <span v-if="dailyPlansData.daily_plans && dailyPlansData.daily_plans.length > 0">
+                  Date Range: {{ formatDate(dailyPlansData.daily_plans[0].plan_date) }} - {{ formatDate(dailyPlansData.daily_plans[dailyPlansData.daily_plans.length - 1].plan_date) }}
+                </span>
+                <span v-else>No daily plans found</span>
+              </div>
+            </q-banner>
+          </div>
+
+          <!-- Daily Plans List -->
+          <div v-if="dailyPlansData && dailyPlansData.daily_plans && dailyPlansData.daily_plans.length > 0" class="daily-plans-list">
+            <q-expansion-item
+              v-for="(dailyPlan, index) in dailyPlansData.daily_plans"
+              :key="dailyPlan.id"
+              :label="`Day ${index + 1} - ${formatDate(dailyPlan.plan_date)}`"
+              :caption="`${dailyPlan.items ? dailyPlan.items.length : 0} exercises`"
+              class="daily-plan-item"
+            >
+              <template v-slot:header>
+                <q-item-section>
+                  <q-item-label>Day {{ index + 1 }} - {{ formatDate(dailyPlan.plan_date) }}</q-item-label>
+                  <q-item-label caption>{{ dailyPlan.items ? dailyPlan.items.length : 0 }} exercises</q-item-label>
+                </q-item-section>
+                <q-item-section side>
+                  <q-badge 
+                    :color="dailyPlan.is_completed ? 'positive' : 'grey-5'" 
+                    :label="dailyPlan.is_completed ? 'Completed' : 'Pending'"
+                  />
+                </q-item-section>
+              </template>
+              
+              <div class="daily-plan-exercises q-pa-md">
+                <div v-if="dailyPlan.items && dailyPlan.items.length > 0" class="exercises-grid">
+                  <q-card 
+                    v-for="(exercise, exerciseIndex) in dailyPlan.items" 
+                    :key="exerciseIndex" 
+                    flat 
+                    bordered 
+                    class="exercise-box"
+                  >
+                    <q-card-section class="exercise-content">
+                      <div class="exercise-header">
+                        <div class="text-subtitle1 exercise-title">
+                          {{ exercise.workout_name || exercise.name || `Exercise ${exerciseIndex + 1}` }}
+                        </div>
+                      </div>
+                      
+                      <div class="exercise-details">
+                        <div class="detail-row">
+                          <div class="detail-item">
+                            <div class="text-caption">Sets</div>
+                            <div class="text-body1">{{ exercise.sets || 0 }}</div>
+                          </div>
+                          <div class="detail-item">
+                            <div class="text-caption">Reps</div>
+                            <div class="text-body1">{{ exercise.reps || 0 }}</div>
+                          </div>
+                        </div>
+                        
+                        <div class="detail-row">
+                          <div class="detail-item">
+                            <div class="text-caption">Weight (kg)</div>
+                            <div class="text-body1">{{ exercise.weight_kg || exercise.weight || 0 }}</div>
+                          </div>
+                          <div class="detail-item">
+                            <div class="text-caption">Minutes</div>
+                            <div class="text-body1">{{ exercise.minutes || exercise.training_minutes || 0 }}</div>
+                          </div>
+                        </div>
+                        
+                        <div v-if="exercise.exercise_types" class="detail-row">
+                          <div class="detail-item full-width">
+                            <div class="text-caption">Exercise Types</div>
+                            <div class="text-body2">{{ exercise.exercise_types }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </q-card-section>
+                  </q-card>
+                </div>
+                <div v-else class="text-center text-grey-6 q-pa-md">
+                  <q-icon name="fitness_center" size="40px" />
+                  <div class="q-mt-sm">No exercises for this day</div>
+                </div>
+              </div>
+            </q-expansion-item>
+          </div>
+
+          <!-- Fallback to original daily plans display -->
+          <div v-else-if="!dailyPlansData" class="days-grid">
             <q-card 
               v-for="(day, dayIndex) in getDailyPlans()" 
               :key="dayIndex" 
@@ -281,6 +400,11 @@ const error = ref(null)
 const actionLoading = ref(false)
 const approvalDetails = ref(null)
 
+// Daily plans management
+const loadingDailyPlans = ref(false)
+const deletingDailyPlans = ref(false)
+const dailyPlansData = ref(null)
+
 const loadApprovalDetails = async () => {
   try {
     loading.value = true
@@ -372,6 +496,54 @@ const calculateDuration = (startDate, endDate) => {
   const diffTime = Math.abs(end - start)
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1
   return diffDays
+}
+
+// Daily plans management methods
+const loadDailyPlans = async () => {
+  try {
+    loadingDailyPlans.value = true
+    const { data } = await api.get(`/trainingApprovals/${route.params.id}/daily-plans`)
+    dailyPlansData.value = data.data
+    console.log('Daily plans loaded:', dailyPlansData.value)
+  } catch (e) {
+    console.error('Failed to load daily plans', e)
+    alert('Failed to load daily plans. Please try again.')
+  } finally {
+    loadingDailyPlans.value = false
+  }
+}
+
+const confirmDeleteDailyPlans = () => {
+  const message = dailyPlansData.value && dailyPlansData.value.total_days > 0 
+    ? `Are you sure you want to delete ALL ${dailyPlansData.value.total_days} daily plans? This action cannot be undone.`
+    : 'Are you sure you want to delete all daily plans? This action cannot be undone.'
+  
+  if (confirm(message)) {
+    deleteDailyPlans()
+  }
+}
+
+const deleteDailyPlans = async () => {
+  try {
+    deletingDailyPlans.value = true
+    const { data } = await api.delete(`/trainingApprovals/${route.params.id}/daily-plans`, {
+      data: { confirm_delete: true }
+    })
+    
+    // Clear the daily plans data
+    dailyPlansData.value = null
+    
+    // Show success message
+    alert(`Successfully deleted ${data.data.deleted_count} daily plans.`)
+    
+    // Optionally reload the approval details
+    await loadApprovalDetails()
+  } catch (e) {
+    console.error('Failed to delete daily plans', e)
+    alert('Failed to delete daily plans. Please try again.')
+  } finally {
+    deletingDailyPlans.value = false
+  }
 }
 
 const getDailyPlans = () => {
@@ -623,6 +795,72 @@ onMounted(() => {
   padding: 2rem;
   background: #f5f5f5;
   border-radius: 8px;
+}
+
+/* Daily Plans Management Styles */
+.daily-plans-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.daily-plans-summary {
+  margin-bottom: 1rem;
+}
+
+.daily-plans-list {
+  margin-top: 1rem;
+}
+
+.daily-plan-item {
+  margin-bottom: 0.5rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: white;
+}
+
+.daily-plan-item:hover {
+  border-color: #2196f3;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.1);
+}
+
+.daily-plan-exercises {
+  background: #f8f9fa;
+  border-top: 1px solid #e0e0e0;
+}
+
+.daily-plan-exercises .exercises-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.daily-plan-exercises .exercise-box {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: white;
+  transition: all 0.2s ease;
+}
+
+.daily-plan-exercises .exercise-box:hover {
+  border-color: #2196f3;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.1);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .daily-plans-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  .daily-plans-actions .q-btn {
+    width: 100%;
+  }
+  
+  .daily-plan-exercises .exercises-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .error-message {

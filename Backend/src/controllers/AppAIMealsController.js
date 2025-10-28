@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const axios = require('axios');
 
 function sumMacros(items) {
   return items.reduce((acc, it) => {
@@ -461,5 +462,553 @@ exports.bulkInsertItems = async (req, res) => {
   } catch (err) {
     console.error('Error bulk inserting AI meal plan items:', err);
     return res.status(500).json({ success: false, message: 'Failed to bulk insert items' });
+  }
+};
+
+// Gemini AI Meal Generation
+async function generateMealItemsWithGemini(params) {
+  const {
+    meal_category,
+    age,
+    height_cm,
+    weight_kg,
+    gender,
+    country,
+    illness,
+    future_goal,
+    plan_duration_days = 7,
+    dietary_restrictions = [],
+    preferences = {}
+  } = params;
+
+  // Create a more focused prompt to avoid overly large responses
+  const createPrompt = (isSimple = false) => {
+    if (isSimple) {
+      return `Generate a ${plan_duration_days}-day meal plan JSON for a ${age}-year-old ${gender} from ${country} with goal: ${future_goal}.
+
+Schema:
+{
+  "items": [
+    {
+      "meal_type": "Breakfast|Lunch|Dinner",
+      "food_item_name": "food name",
+      "grams": number,
+      "calories": number,
+      "proteins": number,
+      "fats": number,
+      "carbs": number,
+      "date": "YYYY-MM-DD",
+      "notes": "preparation notes"
+    }
+  ]
+}
+
+Rules:
+- 3 meals per day (Breakfast, Lunch, Dinner)
+- Culturally appropriate for ${country}
+- ${illness ? `Dietary restriction: ${illness}` : 'No restrictions'}
+- Goal: ${future_goal}
+- Return ONLY valid JSON, no markdown`;
+    }
+
+    return `
+You are a nutrition planning assistant. This is NON-MEDICAL and NON-SEXUAL general nutrition guidance suitable for all audiences. Do not include medical advice.
+
+TASK:
+Generate a comprehensive meal plan JSON for a ${plan_duration_days}-day program strictly in this schema:
+{
+  "items": [
+    {
+      "meal_type": string,              // "Breakfast" | "Lunch" | "Dinner"
+      "food_item_name": string,         // specific food name
+      "grams": number,                  // serving size in grams
+      "calories": number,               // calories per serving
+      "proteins": number,               // protein in grams
+      "fats": number,                   // fat in grams
+      "carbs": number,                  // carbohydrates in grams
+      "date": string,                   // YYYY-MM-DD format (optional, can be null)
+      "notes": string                   // optional preparation notes
+    }
+  ]
+}
+
+USER PROFILE:
+- Age: ${age} years
+- Height: ${height_cm} cm
+- Weight: ${weight_kg} kg
+- Gender: ${gender}
+- Country: ${country}
+- Illness/Dietary Restrictions: ${illness || 'None'}
+- Additional Dietary Restrictions: ${dietary_restrictions.length > 0 ? dietary_restrictions.join(', ') : 'None'}
+- Goal: ${future_goal}
+- Meal Category: ${meal_category}
+- Duration: ${plan_duration_days} days
+
+USER PREFERENCES:
+${Object.keys(preferences).length > 0 ? Object.entries(preferences).map(([key, value]) => `- ${key}: ${value}`).join('\n') : '- No specific preferences provided'}
+
+NUTRITION GUIDELINES:
+- Ensure realistic serving sizes and accurate nutritional values
+- Include culturally appropriate foods for ${country}
+- Consider dietary restrictions: ${illness || 'None'}
+- Respect additional restrictions: ${dietary_restrictions.length > 0 ? dietary_restrictions.join(', ') : 'None'}
+- Focus on ${future_goal} goal with appropriate macro distribution
+
+MEAL DISTRIBUTION RULES:
+- Generate 3 meals per day (Breakfast, Lunch, Dinner)
+- Total daily calories should be appropriate for ${future_goal}
+- Protein: 20-30% of calories
+- Carbs: 45-65% of calories  
+- Fats: 20-35% of calories
+- Include variety across days to prevent monotony
+
+ABSOLUTE OUTPUT RULES:
+- Output must be strictly JSON object as defined above.
+- No preface, no explanation, no markdown code fences.
+- Return ONLY the JSON object with the items array.
+
+Return ONLY the JSON object with the items array.
+`;
+  };
+
+  const prompt = createPrompt();
+
+  // Aggressive parsing for very large responses that might have multiple JSON objects or formatting issues
+  const parseLargeResponseAggressively = (text) => {
+    console.log('🔍 Starting aggressive parsing...');
+    
+    // Strategy 1: Look for individual meal items scattered throughout the text
+    const mealItemPattern = /\{[^}]*"meal_type"[^}]*"food_item_name"[^}]*\}/g;
+    const matches = text.match(mealItemPattern) || [];
+    console.log(`🔍 Found ${matches.length} potential meal items via regex`);
+    
+    const validItems = [];
+    for (const match of matches) {
+      try {
+        const item = JSON.parse(match);
+        if (item.meal_type && item.food_item_name && typeof item.grams === 'number') {
+          validItems.push(item);
+        }
+      } catch (e) {
+        // Skip malformed items
+        continue;
+      }
+    }
+    
+    if (validItems.length > 0) {
+      console.log(`✅ Aggressive parsing found ${validItems.length} valid items`);
+      return validItems;
+    }
+    
+    // Strategy 2: Look for JSON arrays containing meal items
+    const arrayPattern = /\[[\s\S]*?\]/g;
+    const arrays = text.match(arrayPattern) || [];
+    
+    for (const arrayStr of arrays) {
+      try {
+        const arr = JSON.parse(arrayStr);
+        if (Array.isArray(arr)) {
+          const items = arr.filter(item => 
+            item && 
+            typeof item === 'object' && 
+            item.meal_type && 
+            item.food_item_name && 
+            typeof item.grams === 'number'
+          );
+          if (items.length > 0) {
+            console.log(`✅ Found ${items.length} valid items in array`);
+            return items;
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    // Strategy 3: Split by common delimiters and try to parse chunks
+    const chunks = text.split(/\n\s*\n|\}\s*\{/);
+    for (const chunk of chunks) {
+      try {
+        const cleaned = chunk.trim();
+        if (cleaned.startsWith('{') && cleaned.includes('meal_type')) {
+          const item = JSON.parse(cleaned);
+          if (item.meal_type && item.food_item_name && typeof item.grams === 'number') {
+            validItems.push(item);
+          }
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    if (validItems.length > 0) {
+      console.log(`✅ Chunk parsing found ${validItems.length} valid items`);
+      return validItems;
+    }
+    
+    throw new Error('Aggressive parsing found no valid meal items');
+  };
+
+  // Enhanced helper to safely parse JSON even if model returns extra text or incomplete responses
+  const parseItemsFromText = (text) => {
+    const tryParse = (candidate) => {
+      try {
+        return JSON.parse(candidate);
+      } catch (_err) {
+        return null;
+      }
+    };
+
+    // 1) Direct parse
+    let parsed = tryParse(text);
+
+    // 2) Remove code fences ```json ... ``` and retry (handle both complete and incomplete fences)
+    if (!parsed) {
+      // Try complete code fence first
+      const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+      if (fenced && fenced[1]) {
+        parsed = tryParse(fenced[1]);
+      }
+      
+      // If still no parse, try incomplete code fence (common when response is cut off)
+      if (!parsed) {
+        const incompleteFence = /```(?:json)?\s*([\s\S]*?)(?:\n|$)/i.exec(text);
+        if (incompleteFence && incompleteFence[1]) {
+          // Try to fix incomplete JSON by adding missing closing braces
+          let jsonText = incompleteFence[1].trim();
+          if (jsonText.startsWith('{') && !jsonText.endsWith('}')) {
+            // Count opening and closing braces to estimate what's missing
+            const openBraces = (jsonText.match(/\{/g) || []).length;
+            const closeBraces = (jsonText.match(/\}/g) || []).length;
+            const missingBraces = openBraces - closeBraces;
+            
+            // Add missing closing braces and brackets
+            if (jsonText.includes('"items": [')) {
+              jsonText += ']'.repeat(missingBraces > 1 ? missingBraces - 1 : 0);
+              jsonText += '}'.repeat(missingBraces);
+            } else {
+              jsonText += '}'.repeat(missingBraces);
+            }
+          }
+          parsed = tryParse(jsonText);
+        }
+      }
+    }
+
+    // 3) Extract the first JSON object block via regex (greedy, multiline)
+    if (!parsed) {
+      const objectMatch = /\{[\s\S]*\}/m.exec(text);
+      if (objectMatch) parsed = tryParse(objectMatch[0]);
+    }
+
+    // 4) If it returned an array at top-level (rare), wrap
+    if (!parsed) {
+      const arrayMatch = /\[[\s\S]*\]/m.exec(text);
+      if (arrayMatch) {
+        const arr = tryParse(arrayMatch[0]);
+        if (Array.isArray(arr)) parsed = { items: arr };
+      }
+    }
+
+    // 5) Try to extract partial items from incomplete JSON
+    if (!parsed) {
+      const itemsMatch = /"items"\s*:\s*\[([\s\S]*?)(?:\]|$)/i.exec(text);
+      if (itemsMatch && itemsMatch[1]) {
+        try {
+          // Try to parse individual items from the array
+          const itemsText = itemsMatch[1];
+          const itemMatches = itemsText.match(/\{[^}]*\}/g) || [];
+          const items = [];
+          
+          for (const itemText of itemMatches) {
+            try {
+              const item = JSON.parse(itemText);
+              if (item.meal_type && item.food_item_name) {
+                items.push(item);
+              }
+            } catch (e) {
+              // Skip malformed items
+              continue;
+            }
+          }
+          
+          if (items.length > 0) {
+            parsed = { items };
+          }
+        } catch (e) {
+          // Continue to next fallback
+        }
+      }
+    }
+
+    if (!parsed) throw new Error('Gemini returned non-JSON content');
+    if (!parsed.items || !Array.isArray(parsed.items)) throw new Error('Invalid response format from Gemini');
+    
+    // Validate that we have at least some valid items
+    const validItems = parsed.items.filter(item => 
+      item && 
+      typeof item === 'object' && 
+      item.meal_type && 
+      item.food_item_name && 
+      typeof item.grams === 'number'
+    );
+    
+    if (validItems.length === 0) {
+      throw new Error('No valid meal items found in Gemini response');
+    }
+    
+    return validItems;
+  };
+
+  const callGemini = async (model, useSimplePrompt = false) => {
+    const modelId = String(model).startsWith('models/') ? String(model).slice(7) : String(model);
+    const url = `${process.env.GEMINI_API_BASE || 'https://generativelanguage.googleapis.com'}/${process.env.GEMINI_API_VERSION || 'v1'}/models/${modelId}:generateContent`;
+    const currentPrompt = useSimplePrompt ? createPrompt(true) : prompt;
+    
+    console.log(`🔍 Using ${useSimplePrompt ? 'simple' : 'detailed'} prompt for ${model}`);
+    
+    const response = await axios.post(
+      url,
+      {
+        contents: [{ role: 'user', parts: [{ text: currentPrompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: useSimplePrompt ? 8192 : 16384  // Use smaller limit for simple prompt
+        },
+        // keep default safety settings
+      },
+      { headers: { 'Content-Type': 'application/json' }, params: { key: process.env.GEMINI_API_KEY } }
+    );
+    const promptFeedback = response?.data?.promptFeedback;
+    const candidate = response?.data?.candidates?.[0];
+    if (!candidate || !candidate.content?.parts?.length) {
+      const safetyRatings = candidate?.safetyRatings || promptFeedback?.safetyRatings;
+      console.error(`Gemini returned no parts. promptFeedback: ${JSON.stringify(promptFeedback)} safetyRatings: ${JSON.stringify(safetyRatings)}`);
+      throw new Error('Gemini returned empty content');
+    }
+    const rawText = candidate.content.parts.map(p => p.text).join('');
+    
+    // Enhanced logging for debugging
+    console.log(`🔍 Gemini response length: ${rawText.length}`);
+    console.log(`🔍 First 200 chars: ${rawText.substring(0, 200)}`);
+    console.log(`🔍 Last 200 chars: ${rawText.substring(Math.max(0, rawText.length - 200))}`);
+    
+    try {
+      return parseItemsFromText(rawText);
+    } catch (e) {
+      const preview = (rawText || '').slice(0, 1000);
+      console.error('Gemini parse failure preview:', preview);
+      console.error('Gemini response length:', rawText.length);
+      console.error('Parse error:', e.message);
+      
+      // Try a more aggressive parsing approach for very large responses
+      try {
+        console.log('🔄 Attempting aggressive parsing for large response...');
+        const aggressiveResult = parseLargeResponseAggressively(rawText);
+        if (aggressiveResult && aggressiveResult.length > 0) {
+          console.log(`✅ Aggressive parsing succeeded with ${aggressiveResult.length} items`);
+          return aggressiveResult;
+        }
+      } catch (aggressiveError) {
+        console.error('❌ Aggressive parsing also failed:', aggressiveError.message);
+      }
+      
+      throw e;
+    }
+  };
+
+  const modelsToTry = [
+    process.env.GEMINI_MODEL || 'gemini-2.0-flash',
+    process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.0-flash-001'
+  ].filter(Boolean);
+
+  for (const model of modelsToTry) {
+    try {
+      // Try with detailed prompt first
+      const items = await callGemini(model, false);
+      console.log(`✅ Gemini AI generated ${items.length} meal items`);
+      return items;
+    } catch (error) {
+      console.error(`Gemini ${model} failed with detailed prompt`, { model, message: error.message });
+      
+      // Try with simple prompt as fallback
+      try {
+        console.log(`🔄 Retrying ${model} with simple prompt...`);
+        const items = await callGemini(model, true);
+        console.log(`✅ Gemini AI generated ${items.length} meal items with simple prompt`);
+        return items;
+      } catch (simpleError) {
+        console.error(`Gemini ${model} also failed with simple prompt`, { model, message: simpleError.message });
+        
+        if (model === modelsToTry[modelsToTry.length - 1]) { // Last model failed
+          throw new Error(`Failed to generate meal plan with Gemini AI: ${error.message}`);
+        }
+      }
+    }
+  }
+}
+
+// AI Generated Meal Plan with Gemini
+exports.createGeneratedPlanWithAI = async (req, res) => {
+  try {
+    const {
+      user_id,
+      gym_id,
+      meal_plan_category,
+      meal_category, // fallback for backward compatibility
+      start_date,
+      end_date,
+      total_days,
+      age,
+      height_cm,
+      weight_kg,
+      gender,
+      country,
+      illness,
+      future_goal,
+      dietary_restrictions = [],
+      preferences = {},
+      items = [],
+      generate_items = true
+    } = req.body;
+
+    // Resolve meal category (prefer meal_plan_category from mobile app)
+    const resolvedCategory = meal_plan_category || meal_category;
+    
+    // Validate required fields
+    if (!user_id || !resolvedCategory || !start_date || !end_date) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: user_id, meal_plan_category, start_date, end_date'
+      });
+    }
+
+    let generatedItems = [];
+    
+    if (generate_items && items.length === 0) {
+      console.log(`Generating meal items using Gemini AI for category: ${resolvedCategory}`);
+      
+      try {
+        generatedItems = await generateMealItemsWithGemini({
+          meal_category: resolvedCategory,
+          age,
+          height_cm,
+          weight_kg,
+          gender,
+          country,
+          illness,
+          future_goal,
+          plan_duration_days: total_days,
+          dietary_restrictions,
+          preferences
+        });
+      } catch (error) {
+        console.error('❌ Gemini AI generation failed:', error.message);
+        
+        // Check if it's a server/API issue vs other errors
+        const isServerIssue = error.message.includes('503') || 
+                             error.message.includes('502') || 
+                             error.message.includes('504') ||
+                             error.message.includes('Service Unavailable') ||
+                             error.message.includes('Bad Gateway') ||
+                             error.message.includes('Gateway Timeout');
+        
+        if (isServerIssue) {
+          return res.status(503).json({
+            success: false,
+            error: 'Try again later. Server is under repair.',
+            error_code: 'SERVICE_UNAVAILABLE',
+            retry_after: 300 // 5 minutes
+          });
+        } else {
+          return res.status(500).json({
+            success: false,
+            error: `Failed to generate AI meal plan: ${error.message}`,
+            error_code: 'GENERATION_FAILED'
+          });
+        }
+      }
+    } else if (items.length > 0) {
+      generatedItems = items;
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'No meal items provided and generate_items is false. Please provide items or set generate_items to true.'
+      });
+    }
+
+    // Calculate totals
+    const macroTotals = sumMacros(generatedItems);
+    const dailyPlansArr = groupItemsByDateOrDistribute(generatedItems, start_date, end_date);
+
+    // Create the plan in the database
+    const [planRow] = await db('app_ai_generated_meal_plans')
+      .insert({
+        user_id,
+        gym_id: gym_id || req.user?.gym_id,
+        start_date,
+        end_date,
+        meal_category: resolvedCategory,
+        total_days: total_days || Math.max(1, Math.ceil((new Date(end_date) - new Date(start_date)) / (1000*60*60*24)) + 1),
+        total_calories: macroTotals.total_calories,
+        total_proteins: macroTotals.total_proteins,
+        total_fats: macroTotals.total_fats,
+        total_carbs: macroTotals.total_carbs,
+        daily_plans: JSON.stringify(dailyPlansArr),
+        approval_status: 'PENDING',
+      })
+      .returning('*');
+
+    // Insert the generated items into the database
+    if (generatedItems.length > 0) {
+      const rows = generatedItems.map((item) => {
+        return {
+          plan_id: planRow.id,
+          date: item.date || null,
+          meal_type: item.meal_type,
+          food_item_name: item.food_item_name,
+          grams: Number(item.grams) || 0,
+          calories: Number(item.calories) || 0,
+          proteins: Number(item.proteins) || 0,
+          fats: Number(item.fats) || 0,
+          carbs: Number(item.carbs) || 0,
+          notes: item.notes || null,
+          raw_item: item.raw_item ? JSON.stringify(item.raw_item) : null,
+        };
+      });
+      
+      await db('app_ai_generated_meal_plan_items').insert(rows);
+    }
+
+    // Return the response in the exact format expected by Flutter app
+    return res.status(201).json({
+      success: true,
+      data: {
+        id: planRow.id,
+        user_id,
+        gym_id: planRow.gym_id,
+        meal_plan_category: resolvedCategory,
+        start_date: new Date(planRow.start_date).toISOString(),
+        end_date: new Date(planRow.end_date).toISOString(),
+        total_days: planRow.total_days,
+        total_calories: macroTotals.total_calories,
+        total_proteins: macroTotals.total_proteins,
+        total_fats: macroTotals.total_fats,
+        total_carbs: macroTotals.total_carbs,
+        items: generatedItems,
+        daily_plans: dailyPlansArr,
+        created_at: planRow.created_at,
+        updated_at: planRow.updated_at
+      }
+    });
+
+  } catch (err) {
+    console.error('Error creating AI generated meal plan:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to generate AI meal plan'
+    });
   }
 };

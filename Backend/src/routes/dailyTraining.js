@@ -4,10 +4,10 @@ const ctrl = require('../controllers/DailyTrainingController');
 const auth = require('../middleware/authMiddleware');
 
 // Mobile app routes for daily training plans
-router.get('/mobile/plans', auth('mobile_user'), ctrl.getDailyPlans);
-router.get('/mobile/plans/:id', auth('mobile_user'), ctrl.getDailyPlan);
-router.post('/mobile/complete', auth('mobile_user'), ctrl.submitDailyCompletion);
-router.get('/mobile/stats', auth('mobile_user'), ctrl.getTrainingStats);
+router.get('/mobile/plans', auth('USER'), ctrl.getDailyPlans);
+router.get('/mobile/plans/:id', auth('USER'), ctrl.getDailyPlan);
+router.post('/mobile/complete', auth('USER'), ctrl.submitDailyCompletion);
+router.get('/mobile/stats', auth('USER'), ctrl.getTrainingStats);
 
 // Web portal routes (admin/trainer access)
 router.get('/plans', auth(), ctrl.getDailyPlans);

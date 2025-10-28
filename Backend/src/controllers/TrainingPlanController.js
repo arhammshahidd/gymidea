@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { createDistributedPlan } = require('../utils/exerciseDistribution');
+const { getUserProgressForPlan, smartUpdateMobilePlanItems } = require('../utils/smartPlanUpdates');
 
 // List training plans (scoped to gym)
 exports.list = async (req, res, next) => {
@@ -278,27 +279,23 @@ exports.update = async (req, res, next) => {
         if (mobilePlans && mobilePlans.length) {
           let parsed = [];
           try { parsed = JSON.parse(updateData.exercises_details); } catch (_) {}
-          for (const m of mobilePlans) {
-            await db('app_manual_training_plan_items').where({ plan_id: m.id }).del();
-            if (Array.isArray(parsed) && parsed.length) {
-              const rows = parsed.map((ex) => ({
-                plan_id: m.id,
-                workout_name: ex.name || ex.workout_name,
-                exercise_plan_category: ex.exercise_plan_category || updated.category || null,
-                exercise_types: ex.exercise_types ?? null,
-                sets: Number(ex.sets || 0),
-                reps: Number(ex.reps || 0),
-                weight_kg: Number(ex.weight_kg ?? ex.weight ?? 0),
-                minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
-                user_level: ex.user_level || updated.user_level || 'Beginner',
-              }));
-              if (rows.length) await db('app_manual_training_plan_items').insert(rows);
-            }
+          
+          for (const mobilePlan of mobilePlans) {
+            console.log(`🔄 Smart updating mobile plan ${mobilePlan.id} for user ${mobilePlan.user_id}`);
+            
+            // Get user's progress to determine which workouts are completed
+            const userProgress = await getUserProgressForPlan(mobilePlan.user_id, mobilePlan.id);
+            const today = new Date().toISOString().split('T')[0];
+            
+            console.log(`📊 User progress: ${userProgress.completedDays} completed days, today: ${today}`);
+            
+            // Only update future workouts, preserve completed ones
+            await smartUpdateMobilePlanItems(mobilePlan.id, parsed, userProgress, today);
           }
         }
       }
     } catch (mirrorErr) {
-      console.error('Update mirror to mobile failed:', mirrorErr?.message || mirrorErr);
+      console.error('Smart update mirror to mobile failed:', mirrorErr?.message || mirrorErr);
     }
     res.json({ success: true, data: updated });
   } catch (err) { 
@@ -553,16 +550,18 @@ exports.assign = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// Get my assignments (for trainers)
+// Get my assignments (for trainers) - GLOBAL: Shows all assignments for the gym
 exports.getMyAssignments = async (req, res, next) => {
   try {
     const { page = 1, limit = 10, status, category } = req.query;
     const trainerId = req.user.id;
 
+    // Modified: Show ALL assignments for the gym, not just specific trainer
+    // This makes assignments global for all trainers in the same gym
     const query = db('training_plan_assignments')
       .where({ 
-        gym_id: req.user.gym_id,
-        trainer_id: trainerId 
+        gym_id: req.user.gym_id
+        // Removed trainer_id filter to make assignments global
       })
       .orderBy('created_at', 'desc');
 
@@ -572,14 +571,36 @@ exports.getMyAssignments = async (req, res, next) => {
     const rows = await query.limit(limit).offset((page - 1) * limit);
     const [{ count }] = await db('training_plan_assignments')
       .where({ 
-        gym_id: req.user.gym_id,
-        trainer_id: trainerId 
+        gym_id: req.user.gym_id
+        // Removed trainer_id filter to make assignments global
       })
       .count('* as count');
 
+    // Enrich with trainer information to show who originally assigned it
+    const enrichedRows = await Promise.all(rows.map(async (assignment) => {
+      try {
+        // Get trainer info who created this assignment
+        const trainer = await db('users')
+          .where({ id: assignment.trainer_id, gym_id: req.user.gym_id })
+          .select('name', 'email')
+          .first();
+        
+        return {
+          ...assignment,
+          assigned_by_trainer: trainer ? {
+            name: trainer.name,
+            email: trainer.email
+          } : null
+        };
+      } catch (err) {
+        console.error('Error fetching trainer info:', err);
+        return assignment;
+      }
+    }));
+
     res.json({ 
       success: true, 
-      data: rows, 
+      data: enrichedRows, 
       pagination: { 
         page: Number(page), 
         limit: Number(limit), 
@@ -705,7 +726,7 @@ exports.updateAssignment = async (req, res, next) => {
       .update(filteredUpdateData)
       .returning('*');
 
-    // Mirror changes to mobile app
+    // Mirror changes to mobile app with smart updates
     try {
       // Find the mobile plan linked to this assignment
       const mobilePlan = await db('app_manual_training_plans')
@@ -713,7 +734,9 @@ exports.updateAssignment = async (req, res, next) => {
         .first();
 
       if (mobilePlan) {
-        // Update mobile plan
+        console.log(`🔄 Smart updating assignment mobile plan ${mobilePlan.id} for user ${mobilePlan.user_id}`);
+        
+        // Update mobile plan basic info
         await db('app_manual_training_plans')
           .where({ id: mobilePlan.id })
           .update({
@@ -725,35 +748,27 @@ exports.updateAssignment = async (req, res, next) => {
             training_minutes: updated.training_minutes || 0,
           });
 
-        // Update mobile plan items if exercises_details changed
+        // Smart update mobile plan items if exercises_details changed
         if (updateData.exercises_details) {
-          // Delete existing items
-          await db('app_manual_training_plan_items')
-            .where({ plan_id: mobilePlan.id })
-            .del();
-
-          // Insert new items
           try {
             const parsed = JSON.parse(updateData.exercises_details);
             if (Array.isArray(parsed) && parsed.length) {
-              const rows = parsed.map((ex) => ({
-                plan_id: mobilePlan.id,
-                workout_name: ex.name || ex.workout_name,
-                exercise_plan_category: updated.category || null,
-                exercise_types: ex.exercise_types ?? null,
-                sets: Number(ex.sets || 0),
-                reps: Number(ex.reps || 0),
-                weight_kg: Number(ex.weight_kg ?? ex.weight ?? 0),
-                minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
-                user_level: updated.user_level || 'Beginner',
-              }));
-              if (rows.length) await db('app_manual_training_plan_items').insert(rows);
+              // Get user's progress to determine which workouts are completed
+              const userProgress = await getUserProgressForPlan(mobilePlan.user_id, mobilePlan.id);
+              const today = new Date().toISOString().split('T')[0];
+              
+              console.log(`📊 Assignment user progress: ${userProgress.completedDays} completed days, today: ${today}`);
+              
+              // Only update future workouts, preserve completed ones
+              await smartUpdateMobilePlanItems(mobilePlan.id, parsed, userProgress, today);
             }
-          } catch (_) { /* swallow parse error */ }
+          } catch (parseErr) {
+            console.error('Parse error in assignment update:', parseErr);
+          }
         }
       }
     } catch (mirrorErr) {
-      console.error('Assignment update mirror to mobile failed:', mirrorErr?.message || mirrorErr);
+      console.error('Smart assignment update mirror to mobile failed:', mirrorErr?.message || mirrorErr);
     }
 
     res.json({ success: true, data: updated });

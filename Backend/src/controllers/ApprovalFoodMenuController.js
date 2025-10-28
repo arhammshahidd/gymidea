@@ -350,10 +350,10 @@ exports.updateApprovalStatus = async (req, res, next) => {
     const { id } = req.params;
     const { approval_status, approval_notes } = req.body;
     
-    if (!approval_status || !['PENDING', 'APPROVED', 'REJECTED'].includes(approval_status)) {
+    if (!approval_status || !['PENDING', 'APPROVED', 'REJECTED', 'SUPERSEDED'].includes(approval_status)) {
       return res.status(400).json({
         success: false,
-        message: 'approval_status must be PENDING, APPROVED, or REJECTED'
+        message: 'approval_status must be PENDING, APPROVED, REJECTED, or SUPERSEDED'
       });
     }
     

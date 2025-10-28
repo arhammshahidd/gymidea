@@ -14,6 +14,7 @@ router.delete('/requests/:id', auth(), ctrl.deleteRequest);
 router.get('/generated', auth(), ctrl.listGeneratedPlans);
 router.get('/generated/:id', auth(), ctrl.getGeneratedPlan);
 router.post('/generated', auth(), ctrl.createGeneratedPlan);
+router.post('/generated/ai', auth(), ctrl.createGeneratedPlanWithAI); // NEW: AI-powered meal generation
 router.put('/generated/:id', auth(), ctrl.updateGeneratedPlan);
 router.delete('/generated/:id', auth(), ctrl.deleteGeneratedPlan);
 

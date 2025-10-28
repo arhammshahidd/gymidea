@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { getUserProgressForPlan, smartUpdateMobilePlanItems, smartUpdateAIPlanItems } = require('../utils/smartPlanUpdates');
 const axios = require('axios');
 
 // Gemini runtime config (override via env without code edits)
@@ -39,7 +40,7 @@ async function generateWorkoutItemsWithGemini(params) {
 You are a fitness planning assistant. This is NON-MEDICAL and NON-SEXUAL general fitness guidance suitable for all audiences. Do not include medical advice.
 
 TASK:
-Generate a comprehensive training plan JSON for a ${plan_duration_days}-day program strictly in this schema:
+Generate a comprehensive training plan JSON for a ${plan_duration_days}-day program strictly in this schema (include progressive weight ranges):
 {
   "items": [
     {
@@ -47,7 +48,9 @@ Generate a comprehensive training plan JSON for a ${plan_duration_days}-day prog
       "exercise_types": number,          // count of distinct exercise types for this workout (6-12)
       "sets": number,
       "reps": number,
-      "weight_kg": number,
+      "weight_min_kg": number,           // lower bound suitable for the user's level
+      "weight_max_kg": number,           // upper bound suitable for the user's level
+      "weight_kg": number,               // optional: average between min and max (will be ignored if range provided)
       "minutes": number
     }
   ]
@@ -66,6 +69,12 @@ Rules:
 - Vary workout types throughout the plan (strength, cardio, flexibility, etc.)
 - Return ONLY valid JSON, no markdown, no commentary.
 - minutes must be realistic (30-90 minutes per workout)
+
+WEIGHT RANGE RULES:
+- Beginner: use conservative ranges (e.g., 5-20 kg upper body, 10-30 kg lower body)
+- Intermediate: moderate ranges (e.g., 15-40 kg upper body, 25-70 kg lower body)
+- Advanced: challenging ranges tailored to stats
+- Ensure weight_max_kg ≥ weight_min_kg. If unsure, set both to the same safe value.
 
 ABSOLUTE OUTPUT RULES:
 - Output must be strictly JSON object as defined above.
@@ -135,9 +144,54 @@ Return ONLY the JSON object with the items array.
       }
     }
 
+    // 5) Try to extract partial items from incomplete JSON
+    if (!parsed) {
+      const itemsMatch = /"items"\s*:\s*\[([\s\S]*?)(?:\]|$)/i.exec(text);
+      if (itemsMatch && itemsMatch[1]) {
+        try {
+          // Try to parse individual items from the array
+          const itemsText = itemsMatch[1];
+          const itemMatches = itemsText.match(/\{[^}]*\}/g) || [];
+          const items = [];
+          
+          for (const itemText of itemMatches) {
+            try {
+              const item = JSON.parse(itemText);
+              if (item.workout_name && typeof item.sets === 'number') {
+                items.push(item);
+              }
+            } catch (e) {
+              // Skip malformed items
+              continue;
+            }
+          }
+          
+          if (items.length > 0) {
+            parsed = { items };
+          }
+        } catch (e) {
+          // Continue to next fallback
+        }
+      }
+    }
+
     if (!parsed) throw new Error('Gemini returned non-JSON content');
     if (!parsed.items || !Array.isArray(parsed.items)) throw new Error('Invalid response format from Gemini');
-    return parsed.items;
+    
+    // Validate that we have at least some valid items
+    const validItems = parsed.items.filter(item => 
+      item && 
+      typeof item === 'object' && 
+      item.workout_name && 
+      typeof item.sets === 'number' &&
+      typeof item.reps === 'number'
+    );
+    
+    if (validItems.length === 0) {
+      throw new Error('No valid workout items found in Gemini response');
+    }
+    
+    return validItems;
   };
 
   const callGemini = async (model) => {
@@ -151,7 +205,7 @@ Return ONLY the JSON object with the items array.
           temperature: 0.7,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 8192
+          maxOutputTokens: 16384  // Increased from 8192 to handle larger responses
         },
         // keep default safety settings
       },
@@ -177,6 +231,8 @@ Return ONLY the JSON object with the items array.
       };
       console.error('Gemini parse failure preview:', preview);
       console.error('Gemini response shape:', shape);
+      console.error('Gemini response length:', text.length);
+      console.error('Parse error:', e.message);
       throw e;
     }
   };
@@ -301,6 +357,7 @@ exports.createRequest = async (req, res) => {
             exercise_plan_category: category,
             total_workouts: coerceNumber(totalWorkouts, 0),
             training_minutes: coerceNumber(totalMinutes, 0),
+            exercises_details: Array.isArray(items) && items.length > 0 ? JSON.stringify(items) : null,
           })
           .returning('*');
 
@@ -447,10 +504,29 @@ exports.createGeneratedPlan = async (req, res) => {
         console.log(`✅ Gemini AI generated ${generatedItems.length} workout items`);
       } catch (geminiError) {
         console.error('❌ Gemini AI generation failed:', geminiError.message);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to generate AI workout plan. Please ensure Gemini API is properly configured.'
-        });
+        
+        // Check if it's a server/API issue vs other errors
+        const isServerIssue = geminiError.message.includes('503') || 
+                             geminiError.message.includes('502') || 
+                             geminiError.message.includes('504') ||
+                             geminiError.message.includes('Service Unavailable') ||
+                             geminiError.message.includes('Bad Gateway') ||
+                             geminiError.message.includes('Gateway Timeout');
+        
+        if (isServerIssue) {
+          return res.status(503).json({
+            success: false,
+            error: 'Try again later. Server is under repair.',
+            error_code: 'SERVICE_UNAVAILABLE',
+            retry_after: 300 // 5 minutes
+          });
+        } else {
+          return res.status(500).json({
+            success: false,
+            error: `Failed to generate AI workout plan: ${geminiError.message}`,
+            error_code: 'GENERATION_FAILED'
+          });
+        }
       }
     } else if (items.length > 0) {
       generatedItems = items;
@@ -480,21 +556,30 @@ exports.createGeneratedPlan = async (req, res) => {
         user_level: user_level || 'Beginner',
         total_workouts: finalTotalWorkouts,
         training_minutes: finalTrainingMinutes,
+        exercises_details: generatedItems.length > 0 ? JSON.stringify(generatedItems) : null,
       })
       .returning('*');
 
     // Insert the generated items into the database
     if (generatedItems.length > 0) {
       const rows = generatedItems.map((item) => {
+        const min = coerceNumber(item.weight_min_kg, undefined);
+        const max = coerceNumber(item.weight_max_kg, undefined);
+        const avg = Number.isFinite(min) && Number.isFinite(max)
+          ? Math.round(((min + max) / 2) * 100) / 100
+          : coerceNumber(item.weight_kg, 0);
         return {
           plan_id: planRow.id,
           workout_name: item.workout_name,
           sets: coerceNumber(item.sets, 0),
           reps: coerceNumber(item.reps, 0),
-          weight_kg: coerceNumber(item.weight_kg, 0),
+          weight_kg: avg,
           minutes: coerceNumber(item.minutes, 0),
           exercise_types: coerceNumber(item.exercise_types, 0),
           user_level: user_level || 'Beginner',
+          // persist range if present (requires columns; otherwise just return in API)
+          weight_min_kg: min,
+          weight_max_kg: max,
         };
       });
       
@@ -550,23 +635,27 @@ exports.updateGeneratedPlan = async (req, res) => {
       (typeof total_training_minutes === 'number' ? total_training_minutes : existing.training_minutes);
     const [updated] = await db('app_ai_generated_plans')
       .where({ id })
-      .update({ start_date, end_date, exercise_plan_category: resolvedCategory, total_workouts, training_minutes: resolvedTrainingMinutes, updated_at: new Date() })
+      .update({ 
+        start_date, 
+        end_date, 
+        exercise_plan_category: resolvedCategory, 
+        total_workouts, 
+        training_minutes: resolvedTrainingMinutes,
+        exercises_details: Array.isArray(items) && items.length > 0 ? JSON.stringify(items) : existing.exercises_details,
+        updated_at: new Date() 
+      })
       .returning('*');
     if (Array.isArray(items)) {
-      await db('app_ai_generated_plan_items').where({ plan_id: id }).del();
-      if (items.length) {
-        const rows = items.map((it) => {
-          const workoutName = it.workout_name || it.name;
-          const weight = it.weight_kg ?? it.weight ?? 0;
-          const minutes = it.minutes ?? it.training_minutes ?? 0;
-          const row = { plan_id: id, workout_name: workoutName, sets: it.sets || 0, reps: it.reps || 0, weight_kg: weight, minutes, user_level: it.user_level || 'Beginner' };
-          if (it.exercise_types !== undefined && it.exercise_types !== null && it.exercise_types !== '') {
-            row.exercise_types = it.exercise_types;
-          }
-          return row;
-        });
-        await db('app_ai_generated_plan_items').insert(rows);
-      }
+      console.log(`🤖 Smart updating AI Generated Plan ${id} with ${items.length} exercises`);
+      
+      // Get user's progress to determine which workouts are completed
+      const userProgress = await getUserProgressForPlan(existing.user_id, id);
+      const today = new Date().toISOString().split('T')[0];
+      
+      console.log(`📊 AI Plan user progress: ${userProgress.completedDays} completed days, today: ${today}`);
+      
+      // Only update future workouts, preserve completed ones
+      await smartUpdateAIPlanItems(id, items, userProgress, today);
     }
     return res.json({ success: true, data: updated });
   } catch (err) {

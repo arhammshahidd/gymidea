@@ -6,6 +6,7 @@ const auth = require('../middleware/authMiddleware');
 // Mobile app routes for daily training plans
 router.get('/mobile/plans', auth('USER'), ctrl.getDailyPlans);
 router.get('/mobile/plans/:id', auth('USER'), ctrl.getDailyPlan);
+router.post('/mobile/plans/store', auth('USER'), ctrl.storeDailyPlansFromMobile);
 router.post('/mobile/complete', auth('USER'), ctrl.submitDailyCompletion);
 router.get('/mobile/stats', auth('USER'), ctrl.getTrainingStats);
 

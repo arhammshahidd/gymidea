@@ -13,6 +13,6 @@ exports.seed = async function(knex) {
     { name: 'Root Admin', phone: '+10000000000', email: 'admin@example.com', password: hash }
   ]);
 
-  console.log('Inserted super admin -> phone: +10000000000 password: admin123');
+  
 };
 

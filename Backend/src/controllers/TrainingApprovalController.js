@@ -381,31 +381,61 @@ exports.updateStatus = async (req, res, next) => {
     // If approved, ensure daily_plans JSON is generated and stored on the approval for full [start..end]
     if (approval_status === 'APPROVED') {
       try {
-        // Prefer items; fallback to exercises_details
-        let items = [];
-        if (row.items) {
-          try { items = JSON.parse(row.items) || []; } catch (_) { items = []; }
-        } else if (row.exercises_details) {
-          try { items = JSON.parse(row.exercises_details) || []; } catch (_) { items = []; }
+        // Check if daily_plans already exists (from mobile app)
+        let needsGeneration = true;
+        if (row.daily_plans) {
+          try {
+            const existing = JSON.parse(row.daily_plans);
+            if (Array.isArray(existing) && existing.length > 0) {
+              needsGeneration = false;
+              console.log(`✅ Using existing daily_plans (${existing.length} days) from mobile app`);
+            }
+          } catch (_) {
+            // Invalid JSON, regenerate
+          }
         }
 
-        if (Array.isArray(items) && row.start_date && row.end_date) {
-          const startDate = new Date(row.start_date);
-          const endDate = new Date(row.end_date);
-          const distributed = createDistributedPlan({ items }, startDate, endDate);
-          await db('training_approvals')
-            .where({ id: row.id })
-            .update({ daily_plans: JSON.stringify(distributed.daily_plans), total_days: distributed.total_days });
-          row.daily_plans = JSON.stringify(distributed.daily_plans);
-          row.total_days = distributed.total_days;
+        // Only generate if not already present
+        if (needsGeneration) {
+          // Prefer items; fallback to exercises_details
+          let items = [];
+          if (row.items) {
+            try { items = JSON.parse(row.items) || []; } catch (_) { items = []; }
+          } else if (row.exercises_details) {
+            try { items = JSON.parse(row.exercises_details) || []; } catch (_) { items = []; }
+          }
 
-          // Create daily plans for mobile app (for both AI and Manual plans)
-          if (row.user_id) {
-            try {
+          if (Array.isArray(items) && items.length > 0 && row.start_date && row.end_date) {
+            const startDate = new Date(row.start_date);
+            const endDate = new Date(row.end_date);
+            const distributed = createDistributedPlan({ items }, startDate, endDate);
+            await db('training_approvals')
+              .where({ id: row.id })
+              .update({ daily_plans: JSON.stringify(distributed.daily_plans), total_days: distributed.total_days });
+            row.daily_plans = JSON.stringify(distributed.daily_plans);
+            row.total_days = distributed.total_days;
+            console.log(`✅ Generated ${distributed.daily_plans.length} daily plans from ${items.length} items`);
+          }
+        }
+
+        // Create daily plans for mobile app (for both AI and Manual plans)
+        if (row.user_id) {
+          try {
+            // Get items for mobile daily plans creation
+            let items = [];
+            if (row.items) {
+              try { items = JSON.parse(row.items) || []; } catch (_) { items = []; }
+            } else if (row.exercises_details) {
+              try { items = JSON.parse(row.exercises_details) || []; } catch (_) { items = []; }
+            }
+            
+            if (Array.isArray(items) && items.length > 0) {
               const { createDailyTrainingPlansFromPlan } = require('./AppManualTrainingController');
+              // Use plan_id (manual plan ID) instead of approval ID for source_plan_id
+              const sourcePlanId = row.plan_id || row.id;
               await createDailyTrainingPlansFromPlan(
                 {
-                  id: row.id,
+                  id: sourcePlanId,
                   start_date: row.start_date,
                   end_date: row.end_date,
                   exercise_plan_category: row.exercise_plan_category || row.category
@@ -414,7 +444,7 @@ exports.updateStatus = async (req, res, next) => {
                 row.user_id,
                 row.gym_id
               );
-              console.log('✅ Daily plans created for mobile app');
+              console.log(`✅ Daily plans created for mobile app with source_plan_id: ${sourcePlanId}`);
               
               // Update AI plan with exercises_details if it's an AI plan
               if (row.source === 'ai' && row.plan_id) {
@@ -430,10 +460,10 @@ exports.updateStatus = async (req, res, next) => {
                   console.error('❌ Error updating AI plan exercises_details:', aiUpdateError);
                 }
               }
-            } catch (dailyPlanError) {
-              console.error('❌ Error creating daily plans for mobile app:', dailyPlanError);
-              // Don't fail the approval if daily plan creation fails
             }
+          } catch (dailyPlanError) {
+            console.error('❌ Error creating daily plans for mobile app:', dailyPlanError);
+            // Don't fail the approval if daily plan creation fails
           }
         }
       } catch (genErr) {
@@ -642,7 +672,8 @@ exports.mobileSubmit = async (req, res, next) => {
         total_workouts,
         training_minutes,
         user_level,
-        items = []
+        items = [],
+        daily_plans: mobileDailyPlans = null
       } = plan_data;
       
       // Validate plan data
@@ -663,6 +694,19 @@ exports.mobileSubmit = async (req, res, next) => {
       const startDate = new Date(start_date);
       const endDate = new Date(end_date);
       const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+      
+      // Use mobile's daily_plans if provided, otherwise generate from items
+      let dailyPlansToStore = mobileDailyPlans;
+      if (!dailyPlansToStore && Array.isArray(items) && items.length > 0) {
+        try {
+          const { createDistributedPlan } = require('../utils/exerciseDistribution');
+          const distributed = createDistributedPlan({ items }, startDate, endDate);
+          dailyPlansToStore = distributed.daily_plans;
+          console.log(`✅ Generated ${dailyPlansToStore?.length || 0} daily plans from ${items.length} items`);
+        } catch (distErr) {
+          console.error('❌ Failed to generate daily_plans from items:', distErr);
+        }
+      }
       
       // Create training approval record for manual plan
       const [row] = await db('training_approvals')
@@ -695,6 +739,7 @@ exports.mobileSubmit = async (req, res, next) => {
           items: items ? JSON.stringify(items) : null,
           total_exercises: items ? items.length : 0,
           exercises_details: items ? JSON.stringify(items) : null,
+          daily_plans: dailyPlansToStore ? JSON.stringify(dailyPlansToStore) : null,
         })
         .returning('*');
       

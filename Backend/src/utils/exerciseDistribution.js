@@ -47,13 +47,18 @@ function distributeExercises(exercises, totalDays, workoutsPerDay) {
   for (let day = 1; day <= totalDays; day++) {
     const dayWorkouts = [];
     const usedExerciseIds = new Set(); // Track exercise IDs used in this day
+    
+    // Calculate rotation offset for this day to ensure proper cycling
+    // This ensures exercises rotate across days: Day 1 starts at index 0, Day 2 starts at index workoutsPerDay, etc.
+    const dayRotationOffset = ((day - 1) * workoutsPerDay) % exercises.length;
+    let currentExerciseIndex = dayRotationOffset;
 
     // Add workouts for this day
     for (let workout = 0; workout < workoutsPerDay && dayWorkouts.length < 3; workout++) {
-      // Find next available exercise (round-robin with no repetition within same day)
+      // Find next available exercise (round-robin with rotation offset and no repetition within same day)
       let attempts = 0;
       let selectedExercise = null;
-      let startIndex = exerciseIndex;
+      let startIndex = currentExerciseIndex;
       
       while (attempts < exercises.length && !selectedExercise) {
         const currentIndex = (startIndex + attempts) % exercises.length;
@@ -64,7 +69,7 @@ function distributeExercises(exercises, totalDays, workoutsPerDay) {
         if (!usedExerciseIds.has(exerciseId)) {
           selectedExercise = exercise;
           usedExerciseIds.add(exerciseId);
-          exerciseIndex = (currentIndex + 1) % exercises.length;
+          currentExerciseIndex = (currentIndex + 1) % exercises.length;
           break;
         }
         
@@ -75,9 +80,9 @@ function distributeExercises(exercises, totalDays, workoutsPerDay) {
       // we need to repeat some exercises (but still try to minimize repetition)
       if (!selectedExercise && exercises.length > 0) {
         // Use the exercise that was used least recently in this day
-        const leastUsedIndex = (exerciseIndex) % exercises.length;
+        const leastUsedIndex = (currentExerciseIndex) % exercises.length;
         selectedExercise = exercises[leastUsedIndex];
-        exerciseIndex = (leastUsedIndex + 1) % exercises.length;
+        currentExerciseIndex = (leastUsedIndex + 1) % exercises.length;
         // Add to used set to track repetition
         usedExerciseIds.add(selectedExercise.id || selectedExercise.name || selectedExercise.workout_name || leastUsedIndex);
       }
@@ -89,24 +94,13 @@ function distributeExercises(exercises, totalDays, workoutsPerDay) {
 
     // Safety constraint: Ensure at least 1 exercise per day
     if (dayWorkouts.length === 0 && exercises.length > 0) {
-      dayWorkouts.push(exercises[0]);
+      // Use rotation offset to pick the first exercise
+      const safeIndex = dayRotationOffset % exercises.length;
+      dayWorkouts.push(exercises[safeIndex]);
     }
 
-    // If we have exactly the same number of exercises as workouts per day,
-    // and we're showing all exercises on every day, we need to implement proper cycling
-    if (exercises.length === workoutsPerDay && dayWorkouts.length === workoutsPerDay) {
-      // For proper cycling, we should rotate the exercises each day
-      const rotationOffset = (day - 1) % exercises.length;
-      const rotatedExercises = [];
-      
-      for (let i = 0; i < exercises.length; i++) {
-        const rotatedIndex = (i + rotationOffset) % exercises.length;
-        rotatedExercises.push(exercises[rotatedIndex]);
-      }
-      
-      dayWorkouts.length = 0; // Clear the array
-      dayWorkouts.push(...rotatedExercises);
-    }
+    // Update global exerciseIndex for next day's starting point
+    exerciseIndex = currentExerciseIndex;
 
     // Calculate totals for this day
     const totalWorkouts = dayWorkouts.length;

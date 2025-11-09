@@ -1,4 +1,44 @@
 const db = require('../config/db');
+
+// Helper function to parse weight_kg string ranges like "20-40" into min, max, and average
+function parseWeightRange(weightValue) {
+  if (!weightValue) return { weight_kg: 0, weight_min_kg: null, weight_max_kg: null };
+  
+  // If it's already a number, return as is
+  if (typeof weightValue === 'number' || (!isNaN(weightValue) && !weightValue.includes('-'))) {
+    const num = Number(weightValue);
+    return { 
+      weight_kg: num, 
+      weight_min_kg: null, 
+      weight_max_kg: null 
+    };
+  }
+  
+  // If it's a string range like "20-40", parse it
+  if (typeof weightValue === 'string' && weightValue.includes('-')) {
+    const parts = weightValue.split('-').map(p => p.trim()).filter(p => p);
+    if (parts.length === 2) {
+      const min = Number(parts[0]);
+      const max = Number(parts[1]);
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        const avg = Math.round(((min + max) / 2) * 100) / 100;
+        return { 
+          weight_kg: avg, 
+          weight_min_kg: min, 
+          weight_max_kg: max 
+        };
+      }
+    }
+  }
+  
+  // Fallback: try to parse as number
+  const num = Number(weightValue);
+  return { 
+    weight_kg: Number.isFinite(num) ? num : 0, 
+    weight_min_kg: null, 
+    weight_max_kg: null 
+  };
+}
 const { createDistributedPlan } = require('../utils/exerciseDistribution');
 const { getUserProgressForPlan, smartUpdateMobilePlanItems } = require('../utils/smartPlanUpdates');
 
@@ -61,8 +101,14 @@ exports.create = async (req, res, next) => {
       user_level,
       // New payload support
       exercise_plan_category,
-      items,
     } = req.body;
+    
+    // Get items separately as let since we'll need to modify it
+    let items = req.body.items;
+    
+    console.log('Items received:', items ? JSON.stringify(items, null, 2) : 'No items');
+    console.log('Items type:', Array.isArray(items) ? 'Array' : typeof items);
+    console.log('Items length:', Array.isArray(items) ? items.length : 'N/A');
 
     // Backward + new payload compatibility
     const resolvedCategory = exercise_plan_category || category;
@@ -76,48 +122,281 @@ exports.create = async (req, res, next) => {
     let computedReps = reps;
     let computedWeightKg = weight_kg;
     let computedTotalExercises = total_exercises;
+    let computedDailyPlans = null; // Initialize daily_plans
+
+    // Filter out empty objects from items array
+    if (Array.isArray(items)) {
+      const beforeFilter = items.length;
+      items = items.filter(it => {
+        // Keep item if it has at least one meaningful property
+        if (!it || typeof it !== 'object') return false;
+        const hasData = it.name || it.workout_name || it.sets || it.reps || it.weight_kg || it.weight || it.minutes || it.training_minutes;
+        return hasData;
+      });
+      console.log(`Items after filtering empty objects: ${items.length} (was ${beforeFilter})`);
+      
+      // If all items were filtered out (all empty objects), treat as empty
+      if (items.length === 0 && beforeFilter > 0) {
+        console.log('All items were empty objects, will use exercises_details instead');
+        items = [];
+      }
+    }
+
+    // If items array is empty or not provided, but exercises_details exists, parse it
+    // This is the primary source when frontend sends empty objects in items array
+    if ((!items || !Array.isArray(items) || items.length === 0) && exercises_details) {
+      try {
+        let parsed;
+        if (typeof exercises_details === 'string') {
+          parsed = JSON.parse(exercises_details);
+        } else if (Array.isArray(exercises_details)) {
+          parsed = exercises_details;
+        } else {
+          parsed = null;
+        }
+        
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log('Using exercises_details as items, count:', parsed.length);
+          // Convert exercises_details format to items format
+          items = parsed.map(ex => {
+            if (!ex || typeof ex !== 'object') return null;
+            return {
+              workout_name: ex.name || ex.workout_name || 'Exercise',
+              name: ex.name || ex.workout_name || 'Exercise',
+              sets: ex.sets || 0,
+              reps: ex.reps || 0,
+              weight_kg: ex.weight_kg || ex.weight || 0,
+              minutes: ex.minutes || ex.training_minutes || 0,
+              exercise_types: ex.exercise_types || ex.exercise_type || 0
+            };
+          }).filter(it => it !== null); // Filter out any null entries
+          console.log('Converted items from exercises_details:', items.length);
+        }
+      } catch (e) {
+        console.error('Error parsing exercises_details:', e);
+        console.error('exercises_details value:', exercises_details);
+        console.error('exercises_details type:', typeof exercises_details);
+      }
+    }
 
     if (Array.isArray(items) && items.length > 0) {
-      const normalized = items.map((it) => {
+      console.log('Processing items array, count:', items.length);
+      const normalized = items.map((it, index) => {
+        console.log(`Processing item ${index}:`, JSON.stringify(it, null, 2));
+        // Handle both 'name' and 'workout_name' from frontend
+        const workoutName = it.workout_name || it.name || 'Exercise';
+        // Handle weight_kg as string (e.g., "20-40" or "40") or number
+        const weightValue = it.weight_kg || it.weight || 0;
+        // Handle minutes or training_minutes
+        const minutesValue = it.minutes || it.training_minutes || 0;
+        
+        // Parse weight for numeric calculation (extract first number from range)
+        let weightNumeric = 0;
+        if (typeof weightValue === 'string') {
+          if (weightValue.includes('-')) {
+            // Extract first number from range like "20-40"
+            weightNumeric = parseFloat(weightValue.split('-')[0].trim()) || 0;
+          } else {
+            // Try to parse as number
+            weightNumeric = parseFloat(weightValue) || 0;
+          }
+        } else if (typeof weightValue === 'number') {
+          weightNumeric = weightValue;
+        }
+        
         const row = {
-          name: it.workout_name,
-          workout_name: it.workout_name,
+          name: workoutName,
+          workout_name: workoutName,
           exercise_plan_category: it.exercise_plan_category ?? resolvedCategory ?? null,
           sets: Number(it.sets || 0),
           reps: Number(it.reps || 0),
-          weight: Number(it.weight_kg || 0),
-          weight_kg: Number(it.weight_kg || 0),
-          training_minutes: Number(it.minutes || 0),
-          minutes: Number(it.minutes || 0),
+          weight: weightNumeric,
+          weight_kg: weightValue, // Keep as string for ranges like "20-40"
+          training_minutes: Number(minutesValue) || 0,
+          minutes: Number(minutesValue) || 0,
         };
         if (it.exercise_types !== undefined && it.exercise_types !== null && it.exercise_types !== '') {
-          row.exercise_types = it.exercise_types;
+          row.exercise_types = Number(it.exercise_types) || 0;
         }
         return row;
       });
 
       // Create distributed plan
-      const distributedPlan = createDistributedPlan(
-        { items: normalized },
-        new Date(start_date),
-        new Date(end_date)
-      );
+      try {
+        console.log('Creating distributed plan with:', {
+          itemsCount: normalized.length,
+          startDate: start_date,
+          endDate: end_date
+        });
+        
+        // Validate dates
+        const startDate = new Date(start_date);
+        const endDate = new Date(end_date);
+        
+        if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+          throw new Error('Invalid start_date or end_date');
+        }
+        
+        if (endDate < startDate) {
+          throw new Error('end_date must be after start_date');
+        }
+        
+        const distributedPlan = createDistributedPlan(
+          { items: normalized },
+          startDate,
+          endDate
+        );
 
-      normalizedExercisesDetails = JSON.stringify(distributedPlan.daily_plans);
-      computedWorkoutName = computedWorkoutName || normalized.map(n => n.name).filter(Boolean).join(', ');
-      computedTotalWorkouts = computedTotalWorkouts ?? distributedPlan.total_exercises;
-      computedTrainingMinutes = computedTrainingMinutes ?? distributedPlan.total_training_minutes;
-      computedSets = computedSets ?? normalized.reduce((s, n) => s + (n.sets || 0), 0);
-      computedReps = computedReps ?? normalized.reduce((s, n) => s + (n.reps || 0), 0);
-      computedWeightKg = computedWeightKg ?? normalized.reduce((s, n) => s + (n.weight || 0), 0);
-      computedTotalExercises = computedTotalExercises ?? distributedPlan.total_exercises;
+        console.log('Distributed plan created:', {
+          totalDays: distributedPlan.total_days,
+          dailyPlansCount: distributedPlan.daily_plans?.length || 0,
+          workoutsPerDay: distributedPlan.workouts_per_day
+        });
+
+        // Store items array in exercises_details (for backward compatibility)
+        normalizedExercisesDetails = JSON.stringify(normalized);
+        // Store distributed daily plans in daily_plans column
+        if (distributedPlan.daily_plans && Array.isArray(distributedPlan.daily_plans)) {
+          try {
+            computedDailyPlans = JSON.stringify(distributedPlan.daily_plans);
+            console.log('Daily plans JSON length:', computedDailyPlans?.length || 0);
+          } catch (jsonError) {
+            console.error('Error stringifying daily_plans:', jsonError);
+            // Continue without daily_plans if stringification fails
+          }
+        }
+        
+        computedWorkoutName = computedWorkoutName || normalized.map(n => n.name || n.workout_name).filter(Boolean).join(', ');
+        computedTotalWorkouts = computedTotalWorkouts ?? (distributedPlan?.total_exercises || normalized.length);
+        computedTrainingMinutes = computedTrainingMinutes ?? (distributedPlan?.total_training_minutes || 0);
+        computedSets = computedSets ?? normalized.reduce((s, n) => s + (Number(n.sets) || 0), 0);
+        computedReps = computedReps ?? normalized.reduce((s, n) => s + (Number(n.reps) || 0), 0);
+        // For weight_kg, keep as string if it contains ranges, otherwise sum numeric values
+        const weightSum = normalized.reduce((s, n) => {
+          const w = n.weight_kg || n.weight || 0;
+          if (typeof w === 'string' && w.includes('-')) {
+            // For ranges, extract first number
+            const num = parseFloat(w.split('-')[0]) || 0;
+            return s + num;
+          }
+          return s + (Number(w) || 0);
+        }, 0);
+        computedWeightKg = computedWeightKg || (weightSum > 0 ? weightSum.toString() : '');
+        computedTotalExercises = computedTotalExercises ?? (distributedPlan?.total_exercises || normalized.length);
+      } catch (distError) {
+        console.error('Error creating distributed plan:', distError);
+        console.error('Distribution error stack:', distError.stack);
+        console.error('Distribution error message:', distError.message);
+        // Continue without daily_plans if distribution fails
+        if (normalized && Array.isArray(normalized) && normalized.length > 0) {
+          try {
+            normalizedExercisesDetails = JSON.stringify(normalized);
+            computedWorkoutName = computedWorkoutName || normalized.map(n => n.name || n.workout_name).filter(Boolean).join(', ');
+            computedTotalWorkouts = computedTotalWorkouts ?? normalized.length;
+            computedTrainingMinutes = computedTrainingMinutes ?? normalized.reduce((s, n) => s + (Number(n.training_minutes || n.minutes || 0)), 0);
+            computedSets = computedSets ?? normalized.reduce((s, n) => s + (Number(n.sets) || 0), 0);
+            computedReps = computedReps ?? normalized.reduce((s, n) => s + (Number(n.reps) || 0), 0);
+            computedTotalExercises = computedTotalExercises ?? normalized.length;
+          } catch (normalizeError) {
+            console.error('Error normalizing data after distribution failure:', normalizeError);
+          }
+        }
+        // Don't fail the entire request if distribution fails
+      }
+    }
+
+    // If exercises_details exists but no items were provided, try to generate daily_plans from it
+    if (!computedDailyPlans && (normalizedExercisesDetails || exercises_details)) {
+      try {
+        const parsed = JSON.parse(normalizedExercisesDetails || exercises_details);
+        // If it's an array of items, generate daily_plans
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Check if it has workout_name or name (items format)
+          if (parsed[0].workout_name || parsed[0].name) {
+            // Normalize items to have both name and workout_name
+            const normalizedItems = parsed.map(item => ({
+              ...item,
+              name: item.name || item.workout_name,
+              workout_name: item.workout_name || item.name
+            }));
+            
+            const distributedPlan = createDistributedPlan(
+              { items: normalizedItems },
+              new Date(start_date),
+              new Date(end_date)
+            );
+            if (distributedPlan.daily_plans && Array.isArray(distributedPlan.daily_plans)) {
+              computedDailyPlans = JSON.stringify(distributedPlan.daily_plans);
+            }
+          }
+          // If it's already daily_plans format, use it directly
+          else if (parsed[0].date) {
+            computedDailyPlans = JSON.stringify(parsed);
+          }
+        }
+      } catch (e) {
+        console.error('Error generating daily_plans from exercises_details:', e);
+        // If parsing fails, continue without daily_plans
+      }
     }
 
     if (!start_date || !end_date || !resolvedCategory) {
       return res.status(400).json({ success: false, message: 'start_date, end_date, category are required' });
     }
+    
+    // Generate workout name from items if not provided
     if (!computedWorkoutName) {
-      return res.status(400).json({ success: false, message: 'workout_name is required (or provide items with workout_name)' });
+      // Try to get workout name from items array
+      if (Array.isArray(items) && items.length > 0) {
+        const names = items.map(it => it.name || it.workout_name).filter(Boolean);
+        if (names.length > 0) {
+          computedWorkoutName = names.join(', ');
+          console.log('Generated workout name from items:', computedWorkoutName);
+        }
+      }
+      
+      // Try to get workout name from normalizedExercisesDetails
+      if (!computedWorkoutName && normalizedExercisesDetails) {
+        try {
+          const parsed = typeof normalizedExercisesDetails === 'string' 
+            ? JSON.parse(normalizedExercisesDetails) 
+            : normalizedExercisesDetails;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const names = parsed.map(n => n.name || n.workout_name).filter(Boolean);
+            if (names.length > 0) {
+              computedWorkoutName = names.join(', ');
+              console.log('Generated workout name from normalizedExercisesDetails:', computedWorkoutName);
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing exercises_details for workout name:', e);
+        }
+      }
+      
+      // Try to get workout name from exercises_details
+      if (!computedWorkoutName && exercises_details) {
+        try {
+          const parsed = typeof exercises_details === 'string' 
+            ? JSON.parse(exercises_details) 
+            : exercises_details;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const names = parsed.map(n => n.name || n.workout_name).filter(Boolean);
+            if (names.length > 0) {
+              computedWorkoutName = names.join(', ');
+              console.log('Generated workout name from exercises_details:', computedWorkoutName);
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing exercises_details for workout name:', e);
+        }
+      }
+    }
+    
+    if (!computedWorkoutName) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'workout_name is required (or provide items/exercises_details with workout_name/name)' 
+      });
     }
 
     // Ensure all numeric fields are properly converted to integers
@@ -129,18 +408,27 @@ exports.create = async (req, res, next) => {
       end_date,
       category: resolvedCategory,
       workout_name: computedWorkoutName,
-      total_workouts: parseInt(computedTotalWorkouts ?? 0),
-      total_exercises: parseInt(computedTotalExercises ?? 0),
-      training_minutes: parseInt(computedTrainingMinutes ?? 0),
-      sets: parseInt(computedSets ?? 0),
-      reps: parseInt(computedReps ?? 0),
-      weight_kg: computedWeightKg ?? '',
-      exercise_types: null, // Will be calculated from exercises
+      total_workouts: parseInt(computedTotalWorkouts ?? 0) || 0,
+      total_exercises: parseInt(computedTotalExercises ?? 0) || 0,
+      training_minutes: parseInt(computedTrainingMinutes ?? 0) || 0,
+      sets: parseInt(computedSets ?? 0) || 0,
+      reps: parseInt(computedReps ?? 0) || 0,
+      weight_kg: computedWeightKg ? String(computedWeightKg) : '0',
+      // exercise_types was removed from training_plans table - it's now stored in exercises_details JSON
       status: status ?? 'PLANNED',
       assign_to: assign_to ? parseInt(assign_to) : null,
       exercises_details: normalizedExercisesDetails ?? exercises_details ?? null,
+      daily_plans: computedDailyPlans || null, // Store distributed daily plans (nullable)
       user_level: user_level ?? 'Beginner',
     };
+    
+    // Validate planData before insert
+    if (!planData.gym_id) {
+      return res.status(400).json({ success: false, message: 'Gym ID is required' });
+    }
+    if (!planData.workout_name) {
+      return res.status(400).json({ success: false, message: 'Workout name is required' });
+    }
 
     console.log('Inserting plan data:', planData);
     console.log('Exercises details being inserted:', planData.exercises_details);
@@ -149,6 +437,8 @@ exports.create = async (req, res, next) => {
     console.log('Trainer ID being inserted:', planData.trainer_id);
 
     console.log('About to insert plan data into database...');
+    console.log('Daily plans being inserted:', computedDailyPlans ? 'Yes' : 'No');
+    console.log('Plan data keys:', Object.keys(planData));
     let plan;
     try {
       [plan] = await db('training_plans')
@@ -157,8 +447,20 @@ exports.create = async (req, res, next) => {
       console.log('Plan inserted successfully:', plan);
     } catch (dbError) {
       console.error('Database insert error:', dbError);
-      console.error('Plan data that failed to insert:', planData);
-      throw dbError;
+      console.error('Error details:', {
+        message: dbError.message,
+        code: dbError.code,
+        detail: dbError.detail,
+        constraint: dbError.constraint,
+        table: dbError.table
+      });
+      console.error('Plan data that failed to insert:', JSON.stringify(planData, null, 2));
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Failed to create training plan',
+        error: dbError.message || 'Database error',
+        details: dbError.detail || null
+      });
     }
 
     // Mirror to Mobile App tables so it appears in the app immediately
@@ -169,48 +471,83 @@ exports.create = async (req, res, next) => {
         try {
           const parsed = JSON.parse(normalizedExercisesDetails || exercises_details);
           if (Array.isArray(parsed)) {
-            mobileItems = parsed.map((ex) => ({
-              workout_name: ex.name || ex.workout_name,
-              exercise_plan_category: resolvedCategory || null,
-              exercise_types: ex.exercise_types ?? null,
-              sets: ex.sets || 0,
-              reps: ex.reps || 0,
-              weight_kg: ex.weight_kg ?? ex.weight ?? 0,
-              minutes: ex.training_minutes ?? ex.minutes ?? 0,
-            }));
+            mobileItems = parsed.map((ex) => {
+              // Parse weight range from string like "20-40" or separate min/max fields
+              const weightRange = parseWeightRange(ex.weight_kg ?? ex.weight);
+              return {
+                workout_name: ex.name || ex.workout_name,
+                exercise_plan_category: resolvedCategory || null,
+                exercise_types: ex.exercise_types ?? null,
+                sets: ex.sets || 0,
+                reps: ex.reps || 0,
+                weight_kg: weightRange.weight_kg,
+                weight_min_kg: ex.weight_min_kg ?? weightRange.weight_min_kg,
+                weight_max_kg: ex.weight_max_kg ?? weightRange.weight_max_kg,
+                minutes: ex.training_minutes ?? ex.minutes ?? 0,
+              };
+            });
           }
         } catch (_) { /* swallow JSON parse errors for mirror */ }
       }
 
       // Only create a mobile plan if we at least know category and dates
-      const [mobilePlan] = await db('app_manual_training_plans')
-        .insert({
-          user_id: user_id ? parseInt(user_id) : null,
-          gym_id: req.user?.gym_id ?? null,
-          exercise_plan_category: resolvedCategory,
-          start_date,
-          end_date,
-          total_workouts: parseInt(computedTotalWorkouts ?? 0),
-          total_exercises: parseInt(computedTotalExercises ?? (mobileItems?.length || 0)),
-          training_minutes: parseInt(computedTrainingMinutes ?? 0),
-          web_plan_id: plan.id,
-        })
-        .returning('*');
+      let mobilePlan;
+      try {
+        [mobilePlan] = await db('app_manual_training_plans')
+          .insert({
+            user_id: user_id ? parseInt(user_id) : null,
+            gym_id: req.user?.gym_id ?? null,
+            exercise_plan_category: resolvedCategory,
+            start_date,
+            end_date,
+            total_workouts: parseInt(computedTotalWorkouts ?? 0) || 0,
+            total_exercises: parseInt(computedTotalExercises ?? (mobileItems?.length || 0)) || 0,
+            training_minutes: parseInt(computedTrainingMinutes ?? 0) || 0,
+            web_plan_id: plan.id,
+          })
+          .returning('*');
+      } catch (mobileInsertError) {
+        console.error('Error inserting mobile plan:', mobileInsertError);
+        console.error('Mobile plan insert error details:', {
+          message: mobileInsertError.message,
+          code: mobileInsertError.code,
+          detail: mobileInsertError.detail,
+          constraint: mobileInsertError.constraint
+        });
+        // Continue without mobile plan if insert fails
+        mobilePlan = null;
+      }
 
-      if (Array.isArray(mobileItems) && mobileItems.length > 0) {
-        const rows = mobileItems.map((it) => ({
-          plan_id: mobilePlan.id,
-          workout_name: it.workout_name,
-          exercise_plan_category: it.exercise_plan_category || resolvedCategory || null,
-          exercise_types: it.exercise_types || null,
-          sets: Number(it.sets || 0),
-          reps: Number(it.reps || 0),
-          weight_kg: Number(it.weight_kg || 0),
-          minutes: Number(it.minutes || 0),
-          user_level: it.user_level || 'Beginner',
-        }));
-        if (rows.length) {
-          await db('app_manual_training_plan_items').insert(rows);
+      if (mobilePlan && Array.isArray(mobileItems) && mobileItems.length > 0) {
+        try {
+          const rows = mobileItems.map((it) => {
+            // Weight ranges are already parsed by parseWeightRange helper above
+            return {
+              plan_id: mobilePlan.id,
+              workout_name: it.workout_name,
+              exercise_plan_category: it.exercise_plan_category || resolvedCategory || null,
+              exercise_types: it.exercise_types || null,
+              sets: Number(it.sets || 0),
+              reps: Number(it.reps || 0),
+              weight_kg: Number(it.weight_kg || 0),
+              weight_min_kg: it.weight_min_kg != null ? Number(it.weight_min_kg) : null,
+              weight_max_kg: it.weight_max_kg != null ? Number(it.weight_max_kg) : null,
+              minutes: Number(it.minutes || 0),
+              user_level: it.user_level || 'Beginner',
+            };
+          });
+          if (rows.length) {
+            await db('app_manual_training_plan_items').insert(rows);
+            console.log(`✅ Inserted ${rows.length} mobile plan items`);
+          }
+        } catch (itemsInsertError) {
+          console.error('Error inserting mobile plan items:', itemsInsertError);
+          console.error('Items insert error details:', {
+            message: itemsInsertError.message,
+            code: itemsInsertError.code,
+            detail: itemsInsertError.detail
+          });
+          // Continue even if items insert fails
         }
       }
     } catch (mirrorErr) {
@@ -219,7 +556,32 @@ exports.create = async (req, res, next) => {
     }
 
     res.status(201).json({ success: true, data: plan });
-  } catch (err) { next(err); }
+  } catch (err) {
+    console.error('=== CREATE PLAN ERROR ===');
+    console.error('Error message:', err.message);
+    console.error('Error stack:', err.stack);
+    console.error('Error details:', {
+      name: err.name,
+      code: err.code,
+      detail: err.detail,
+      constraint: err.constraint,
+      table: err.table
+    });
+    console.error('Request body:', JSON.stringify(req.body, null, 2));
+    console.error('User:', JSON.stringify(req.user, null, 2));
+    
+    // Return error response instead of passing to next() to get better error details
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create training plan',
+      error: err.message || 'Unknown error',
+      details: err.detail || null,
+      error_code: err.code || null,
+      constraint: err.constraint || null,
+      table: err.table || null,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
 };
 
 // Get single plan
@@ -440,8 +802,22 @@ exports.assign = async (req, res, next) => {
           reps: plan.reps || 0,
           weight_kg: plan.weight_kg || 0,
           exercises_details: plan.exercises_details || JSON.stringify([]),
+          daily_plans: plan.daily_plans || null, // Copy daily_plans from training plan
         })
         .returning('*');
+
+      // Sync daily plans from assignment to daily_training_plans table
+      // This is for assigned plans only (not manual or AI-generated)
+      if (assignment.daily_plans) {
+        try {
+          const { syncDailyPlansFromAssignmentHelper } = require('./DailyTrainingController');
+          await syncDailyPlansFromAssignmentHelper(assignment.id);
+          console.log(`✅ Synced daily plans from assignment ${assignment.id} to daily_training_plans`);
+        } catch (syncErr) {
+          console.error('⚠️ Failed to sync daily plans from assignment:', syncErr?.message || syncErr);
+          // Don't fail the assignment creation if sync fails
+        }
+      }
 
       // Mirror assignment to mobile
       try {
@@ -502,8 +878,9 @@ exports.assign = async (req, res, next) => {
         training_minutes: plan.training_minutes || 0,
         sets: plan.sets || 0,
         reps: plan.reps || 0,
-        weight_kg: plan.weight_kg || 0,
+        weight_kg: plan.weight_kg || '0', // Keep as string to support ranges like "20-40"
         exercises_details: plan.exercises_details || JSON.stringify([]),
+        daily_plans: plan.daily_plans || null, // Copy daily_plans from training plan
       })
       .returning('*');
 
@@ -527,23 +904,46 @@ exports.assign = async (req, res, next) => {
         try {
           const parsed = JSON.parse(assignment.exercises_details);
           if (Array.isArray(parsed) && parsed.length) {
-            const rows = parsed.map((ex) => ({
-              plan_id: mobilePlan.id,
-              workout_name: ex.name || ex.workout_name,
-              exercise_plan_category: assignment.category || null,
-              exercise_types: ex.exercise_types ?? null,
-              sets: Number(ex.sets || 0),
-              reps: Number(ex.reps || 0),
-              weight_kg: Number(ex.weight_kg ?? ex.weight ?? 0),
-              minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
-              user_level: assignment.user_level || 'Beginner',
-            }));
+            const rows = parsed.map((ex) => {
+              // For assignments: Keep weight_kg as string (e.g., "20-40") in assignment table
+              // But parse it for mobile app items table which has weight_min_kg and weight_max_kg columns
+              const weightValue = ex.weight_kg ?? ex.weight ?? 0;
+              const weightRange = parseWeightRange(weightValue);
+              
+              return {
+                plan_id: mobilePlan.id,
+                workout_name: ex.name || ex.workout_name,
+                exercise_plan_category: assignment.category || null,
+                exercise_types: ex.exercise_types ?? null,
+                sets: Number(ex.sets || 0),
+                reps: Number(ex.reps || 0),
+                // For mobile app items: parse weight range into min/max for proper storage
+                weight_kg: weightRange.weight_kg,
+                weight_min_kg: ex.weight_min_kg ?? weightRange.weight_min_kg,
+                weight_max_kg: ex.weight_max_kg ?? weightRange.weight_max_kg,
+                minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
+                user_level: assignment.user_level || 'Beginner',
+              };
+            });
             if (rows.length) await db('app_manual_training_plan_items').insert(rows);
           }
         } catch (_) { /* swallow parse error */ }
       }
     } catch (mirrorErr) {
       console.error('Assignment mirror to mobile failed:', mirrorErr?.message || mirrorErr);
+    }
+
+    // Sync daily plans from assignment to daily_training_plans table
+    // This is for assigned plans only (not manual or AI-generated)
+    if (assignment.daily_plans) {
+      try {
+        const { syncDailyPlansFromAssignmentHelper } = require('./DailyTrainingController');
+        await syncDailyPlansFromAssignmentHelper(assignment.id);
+        console.log(`✅ Synced daily plans from assignment ${assignment.id} to daily_training_plans`);
+      } catch (syncErr) {
+        console.error('⚠️ Failed to sync daily plans from assignment:', syncErr?.message || syncErr);
+        // Don't fail the assignment creation if sync fails
+      }
     }
 
     return res.status(201).json({ success: true, data: assignment, assignment: true });
@@ -789,7 +1189,35 @@ exports.deleteAssignment = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Assignment not found' });
     }
 
-    // Delete mobile mirror first
+    // Delete related daily training plans first
+    try {
+      // Handle both 'web_assigned' and 'web_assigne' (typo variant) for robustness
+      // Also handle both string and integer source_plan_id values (column is integer, but some records may have string)
+      const dailyPlansQuery = db('daily_training_plans')
+        .where({
+          user_id: assignment.user_id,
+          is_stats_record: false
+        })
+        .whereIn('plan_type', ['web_assigned', 'web_assigne'])
+        .where(function() {
+          // Match both string and integer versions of source_plan_id
+          this.where('source_plan_id', assignment.id)
+              .orWhere('source_plan_id', assignment.id.toString());
+        });
+
+      // Add gym_id filter if assignment has gym_id
+      if (assignment.gym_id != null) {
+        dailyPlansQuery.andWhere({ gym_id: assignment.gym_id });
+      }
+
+      const deletedDailyPlansCount = await dailyPlansQuery.del();
+      console.log(`✅ Deleted ${deletedDailyPlansCount} daily training plans for assignment ${id}`);
+    } catch (dailyPlansErr) {
+      console.error('❌ Error deleting daily training plans for assignment:', dailyPlansErr?.message || dailyPlansErr);
+      // Continue with deletion even if daily plans deletion fails
+    }
+
+    // Delete mobile mirror
     try {
       const mobilePlan = await db('app_manual_training_plans')
         .where({ web_plan_id: assignment.id })
@@ -824,11 +1252,24 @@ exports.getUserAssignments = async (req, res, next) => {
   try {
     const { user_id } = req.params;
     const { page = 1, limit = 50 } = req.query;
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
+
+    // SECURITY: Ensure proper user isolation
+    let targetUserId;
+    if (requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer') {
+      // Admin/trainer can access specific user's assignments in their gym
+      targetUserId = parseInt(user_id);
+    } else {
+      // Regular users can only access their own assignments
+      // Ignore user_id from params and use authenticated user's ID
+      targetUserId = requestingUserId;
+    }
 
     const query = db('training_plan_assignments')
       .where({ 
         gym_id: req.user.gym_id,
-        user_id: parseInt(user_id)
+        user_id: targetUserId
       })
       .orderBy('created_at', 'desc');
 
@@ -836,7 +1277,7 @@ exports.getUserAssignments = async (req, res, next) => {
     const [{ count }] = await db('training_plan_assignments')
       .where({ 
         gym_id: req.user.gym_id,
-        user_id: parseInt(user_id)
+        user_id: targetUserId
       })
       .count('* as count');
 

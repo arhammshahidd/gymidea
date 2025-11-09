@@ -423,10 +423,46 @@ exports.updateStatus = async (req, res, next) => {
           try {
             // Get items for mobile daily plans creation
             let items = [];
-            if (row.items) {
-              try { items = JSON.parse(row.items) || []; } catch (_) { items = []; }
-            } else if (row.exercises_details) {
-              try { items = JSON.parse(row.exercises_details) || []; } catch (_) { items = []; }
+            
+            // For AI plans, fetch items directly from app_ai_generated_plan_items to preserve weight_min_kg and weight_max_kg
+            if (row.source === 'ai' && row.plan_id) {
+              try {
+                const aiPlanItems = await db('app_ai_generated_plan_items')
+                  .where({ plan_id: row.plan_id })
+                  .orderBy('id', 'asc');
+                
+                // Convert database items to format expected by createDailyTrainingPlansFromPlan
+                items = aiPlanItems.map(item => ({
+                  workout_name: item.workout_name,
+                  name: item.workout_name,
+                  sets: item.sets,
+                  reps: item.reps,
+                  weight_kg: item.weight_kg,
+                  weight_min_kg: item.weight_min_kg,
+                  weight_max_kg: item.weight_max_kg,
+                  minutes: item.minutes,
+                  training_minutes: item.minutes,
+                  exercise_types: item.exercise_types,
+                  user_level: item.user_level
+                }));
+                
+                console.log(`✅ Fetched ${items.length} AI plan items with weight ranges from app_ai_generated_plan_items`);
+              } catch (aiItemError) {
+                console.error('❌ Error fetching AI plan items:', aiItemError);
+                // Fallback to parsing from row.items
+                if (row.items) {
+                  try { items = JSON.parse(row.items) || []; } catch (_) { items = []; }
+                } else if (row.exercises_details) {
+                  try { items = JSON.parse(row.exercises_details) || []; } catch (_) { items = []; }
+                }
+              }
+            } else {
+              // For manual plans, parse from items or exercises_details
+              if (row.items) {
+                try { items = JSON.parse(row.items) || []; } catch (_) { items = []; }
+              } else if (row.exercises_details) {
+                try { items = JSON.parse(row.exercises_details) || []; } catch (_) { items = []; }
+              }
             }
             
             if (Array.isArray(items) && items.length > 0) {
@@ -497,6 +533,18 @@ exports.updateStatus = async (req, res, next) => {
               approved_at: new Date()
             });
           console.log('✅ Manual plan status synced');
+          
+          // If approved, sync daily plans to daily_training_plans
+          if (approval_status === 'APPROVED' && row.plan_id) {
+            try {
+              const { syncDailyPlansFromManualPlanHelper } = require('./DailyTrainingController');
+              await syncDailyPlansFromManualPlanHelper(row.plan_id);
+              console.log(`✅ Synced daily plans for approved manual plan ${row.plan_id}`);
+            } catch (syncError) {
+              console.error('❌ Error syncing daily plans for approved manual plan:', syncError);
+              // Don't fail the approval if sync fails
+            }
+          }
         } else {
           // Fallback: if plan_type indicates AI, still sync to AI table
           if (row.plan_type === 'ai_generated') {
@@ -563,6 +611,43 @@ exports.mobileSubmit = async (req, res, next) => {
         const endDate = new Date(end_date);
         const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
 
+        // Get daily_plans from AI plan if it exists
+        let dailyPlansForApproval = null;
+        if (plan_id) {
+          try {
+            const aiPlan = await db('app_ai_generated_plans')
+              .where({ id: plan_id })
+              .first();
+            
+            if (aiPlan && aiPlan.daily_plans) {
+              // Use daily_plans from AI plan (ensure it's a JSON string)
+              if (typeof aiPlan.daily_plans === 'string') {
+                dailyPlansForApproval = aiPlan.daily_plans;
+              } else {
+                dailyPlansForApproval = JSON.stringify(aiPlan.daily_plans);
+              }
+              console.log(`✅ Found daily_plans in AI plan ${plan_id}, copying to training_approvals`);
+            } else if (aiPlan && Array.isArray(items) && items.length > 0) {
+              // If daily_plans doesn't exist, generate from items
+              try {
+                const { createDistributedPlan } = require('../utils/exerciseDistribution');
+                const distributedPlan = createDistributedPlan(
+                  { items },
+                  startDate,
+                  endDate
+                );
+                dailyPlansForApproval = JSON.stringify(distributedPlan.daily_plans);
+                console.log(`✅ Generated daily_plans from items for AI plan ${plan_id}`);
+              } catch (distError) {
+                console.error('❌ Failed to generate daily_plans for approval:', distError);
+              }
+            }
+          } catch (planError) {
+            console.error('❌ Error fetching AI plan for daily_plans:', planError);
+            // Continue without daily_plans if fetch fails
+          }
+        }
+
         const [row] = await db('training_approvals')
           .insert({
             gym_id: req.user.gym_id,
@@ -590,7 +675,7 @@ exports.mobileSubmit = async (req, res, next) => {
             plan_type: plan_type,
             exercise_plan_category: exercise_plan_category,
             items: Array.isArray(items) && items.length ? JSON.stringify(items) : null,
-            daily_plans: null,
+            daily_plans: dailyPlansForApproval,
             total_exercises: Array.isArray(items) ? items.length : 0,
             exercises_details: Array.isArray(items) && items.length ? JSON.stringify(items) : null,
             requested_at: requested_at ? new Date(requested_at) : new Date()
@@ -695,14 +780,53 @@ exports.mobileSubmit = async (req, res, next) => {
       const endDate = new Date(end_date);
       const totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
       
-      // Use mobile's daily_plans if provided, otherwise generate from items
-      let dailyPlansToStore = mobileDailyPlans;
+      // Get daily_plans from manual plan if it exists (preferred source)
+      let dailyPlansToStore = null;
+      if (plan_id) {
+        try {
+          const manualPlan = await db('app_manual_training_plans')
+            .where({ id: plan_id })
+            .first();
+          
+          if (manualPlan && manualPlan.daily_plans) {
+            // Use daily_plans from manual plan (ensure it's in the right format)
+            if (typeof manualPlan.daily_plans === 'string') {
+              try {
+                // Parse to validate it's valid JSON, then use as-is
+                JSON.parse(manualPlan.daily_plans);
+                dailyPlansToStore = manualPlan.daily_plans;
+              } catch (e) {
+                // Invalid JSON, treat as object
+                dailyPlansToStore = JSON.stringify(manualPlan.daily_plans);
+              }
+            } else {
+              dailyPlansToStore = JSON.stringify(manualPlan.daily_plans);
+            }
+            console.log(`✅ Found daily_plans in manual plan ${plan_id}, copying to training_approvals`);
+          }
+        } catch (planError) {
+          console.error('❌ Error fetching manual plan for daily_plans:', planError);
+          // Continue to fallback options
+        }
+      }
+      
+      // Fallback 1: Use mobile's daily_plans if provided and database didn't have it
+      if (!dailyPlansToStore && mobileDailyPlans) {
+        if (typeof mobileDailyPlans === 'string') {
+          dailyPlansToStore = mobileDailyPlans;
+        } else {
+          dailyPlansToStore = JSON.stringify(mobileDailyPlans);
+        }
+        console.log(`✅ Using daily_plans from mobile app submission`);
+      }
+      
+      // Fallback 2: Generate from items if still no daily_plans
       if (!dailyPlansToStore && Array.isArray(items) && items.length > 0) {
         try {
           const { createDistributedPlan } = require('../utils/exerciseDistribution');
           const distributed = createDistributedPlan({ items }, startDate, endDate);
-          dailyPlansToStore = distributed.daily_plans;
-          console.log(`✅ Generated ${dailyPlansToStore?.length || 0} daily plans from ${items.length} items`);
+          dailyPlansToStore = JSON.stringify(distributed.daily_plans);
+          console.log(`✅ Generated ${distributed.daily_plans?.length || 0} daily plans from ${items.length} items`);
         } catch (distErr) {
           console.error('❌ Failed to generate daily_plans from items:', distErr);
         }
@@ -739,7 +863,7 @@ exports.mobileSubmit = async (req, res, next) => {
           items: items ? JSON.stringify(items) : null,
           total_exercises: items ? items.length : 0,
           exercises_details: items ? JSON.stringify(items) : null,
-          daily_plans: dailyPlansToStore ? JSON.stringify(dailyPlansToStore) : null,
+          daily_plans: dailyPlansToStore, // Already a JSON string
         })
         .returning('*');
       
@@ -978,11 +1102,22 @@ exports.getDailyPlans = async (req, res, next) => {
     
     const dailyPlans = await query;
     
-    // Get plan items for each daily plan
+    // Get plan items from exercises_details JSON for each daily plan
     for (let plan of dailyPlans) {
-      const items = await db('daily_training_plan_items')
-        .where({ daily_plan_id: plan.id })
-        .orderBy('id', 'asc');
+      let items = [];
+      try {
+        const details = plan.exercises_details;
+        if (details) {
+          const parsed = typeof details === 'string' ? JSON.parse(details) : details;
+          if (Array.isArray(parsed)) {
+            items = parsed;
+          } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.workouts)) {
+            items = parsed.workouts;
+          }
+        }
+      } catch (e) {
+        items = [];
+      }
       plan.items = items;
     }
     
@@ -1045,12 +1180,8 @@ exports.deleteDailyPlans = async (req, res, next) => {
       });
     }
     
-    // Delete plan items first
-    for (let plan of dailyPlans) {
-      await db('daily_training_plan_items')
-        .where({ daily_plan_id: plan.id })
-        .del();
-    }
+    // Items are now stored in exercises_details JSON column
+    // No need to delete from daily_training_plan_items table
     
     // Delete daily plans
     const deletedCount = await query.del();

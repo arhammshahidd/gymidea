@@ -1,6 +1,46 @@
 const db = require('../config/db');
 const { getUserProgressForPlan, smartUpdateMobilePlanItems, smartUpdateManualPlanItems } = require('../utils/smartPlanUpdates');
 
+// Helper function to parse weight_kg string ranges like "20-40" into min, max, and average
+function parseWeightRange(weightValue) {
+  if (!weightValue) return { weight_kg: 0, weight_min_kg: null, weight_max_kg: null };
+  
+  // If it's already a number, return as is
+  if (typeof weightValue === 'number' || (!isNaN(weightValue) && !String(weightValue).includes('-'))) {
+    const num = Number(weightValue);
+    return { 
+      weight_kg: num, 
+      weight_min_kg: null, 
+      weight_max_kg: null 
+    };
+  }
+  
+  // If it's a string range like "20-40", parse it
+  if (typeof weightValue === 'string' && weightValue.includes('-')) {
+    const parts = weightValue.split('-').map(p => p.trim()).filter(p => p);
+    if (parts.length === 2) {
+      const min = Number(parts[0]);
+      const max = Number(parts[1]);
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        const avg = Math.round(((min + max) / 2) * 100) / 100;
+        return { 
+          weight_kg: avg, 
+          weight_min_kg: min, 
+          weight_max_kg: max 
+        };
+      }
+    }
+  }
+  
+  // Fallback: try to parse as number
+  const num = Number(weightValue);
+  return { 
+    weight_kg: Number.isFinite(num) ? num : 0, 
+    weight_min_kg: null, 
+    weight_max_kg: null 
+  };
+}
+
 // Helper function to create daily plans from training plan
 exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPlansFromPlan(plan, items, user_id, gym_id) {
   try {
@@ -48,12 +88,7 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
         plan_type: 'manual',
         source_plan_id: plan.id,
         plan_category: plan.exercise_plan_category,
-        workout_name: dayItems[0]?.workout_name || dayItems[0]?.name || 'Daily Workout',
-        total_exercises: dayItems.length,
-        training_minutes: totalMinutes,
-        total_sets: totalSets,
-        total_reps: totalReps,
-        total_weight_kg: totalWeight,
+        // workout_name removed - can be derived from exercises_details if needed
         user_level: dayItems[0]?.user_level || 'Beginner',
         exercises_details: JSON.stringify(dayItems)
       });
@@ -66,20 +101,26 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
     for (const dailyPlan of insertedPlans) {
       const exercises = JSON.parse(dailyPlan.exercises_details || '[]');
       if (exercises.length > 0) {
-        const items = exercises.map(ex => ({
-          daily_plan_id: dailyPlan.id,
-          exercise_name: ex.workout_name || 'Exercise',
-          sets: ex.sets || 0,
-          reps: ex.reps || 0,
-          weight_kg: ex.weight_kg || 0,
-          weight_min_kg: ex.weight_min_kg ? Number(ex.weight_min_kg) : null,
-          weight_max_kg: ex.weight_max_kg ? Number(ex.weight_max_kg) : null,
-          minutes: ex.minutes || 0,
-          exercise_type: ex.exercise_types || null,
-          notes: null
-        }));
+        const items = exercises.map(ex => {
+          // Parse weight range from string like "20-40" or separate min/max fields
+          const weightRange = parseWeightRange(ex.weight_kg ?? ex.weight);
+          
+          return {
+            daily_plan_id: dailyPlan.id,
+            exercise_name: ex.workout_name || 'Exercise',
+            sets: ex.sets || 0,
+            reps: ex.reps || 0,
+            weight_kg: weightRange.weight_kg,
+            weight_min_kg: ex.weight_min_kg ?? weightRange.weight_min_kg,
+            weight_max_kg: ex.weight_max_kg ?? weightRange.weight_max_kg,
+            minutes: ex.minutes || 0,
+            exercise_type: ex.exercise_types || null,
+            notes: null
+          };
+        });
         
-        await db('daily_training_plan_items').insert(items);
+        // Items are now stored in exercises_details JSON column
+        // No need to insert into daily_training_plan_items table
       }
     }
     
@@ -136,17 +177,24 @@ exports.createPlan = async (req, res) => {
     // Insert items if provided
     let planItems = [];
     if (Array.isArray(items) && items.length) {
-      const rows = items.map((it) => ({
-        plan_id: plan.id,
-        workout_name: it.workout_name || it.name || 'Exercise',
-        exercise_plan_category: it.exercise_plan_category || null,
-        exercise_types: it.exercise_types || null,
-        sets: Number(it.sets || 0),
-        reps: Number(it.reps || 0),
-        weight_kg: Number(it.weight_kg || 0),
-        minutes: Number(it.minutes || 0),
-        user_level: it.user_level || 'Beginner',
-      }));
+      const rows = items.map((it) => {
+        // Parse weight range from string like "20-40" or separate min/max fields
+        const weightRange = parseWeightRange(it.weight_kg ?? it.weight);
+        
+        return {
+          plan_id: plan.id,
+          workout_name: it.workout_name || it.name || 'Exercise',
+          exercise_plan_category: it.exercise_plan_category || null,
+          exercise_types: it.exercise_types || null,
+          sets: Number(it.sets || 0),
+          reps: Number(it.reps || 0),
+          weight_kg: weightRange.weight_kg,
+          weight_min_kg: it.weight_min_kg ?? weightRange.weight_min_kg,
+          weight_max_kg: it.weight_max_kg ?? weightRange.weight_max_kg,
+          minutes: Number(it.minutes || 0),
+          user_level: it.user_level || 'Beginner',
+        };
+      });
       try {
         planItems = await db('app_manual_training_plan_items').insert(rows).returning('*');
       } catch (itemsErr) {
@@ -163,7 +211,51 @@ exports.createPlan = async (req, res) => {
       // Don't fail the main request if daily plans creation fails
     }
 
-    return res.status(201).json({ success: true, data: plan });
+    // Sync daily plans from manual plan to daily_training_plans (similar to assigned plans)
+    try {
+      const { syncDailyPlansFromManualPlanHelper } = require('./DailyTrainingController');
+      await syncDailyPlansFromManualPlanHelper(plan.id);
+    } catch (syncError) {
+      console.error('Failed to sync daily plans from manual plan:', syncError);
+      // Don't fail the main request if sync fails
+    }
+
+    // Get approval_id if plan is already approved (unlikely for new plan, but check anyway)
+    let approval_id = null;
+    if (plan.approval_status === 'APPROVED') {
+      try {
+        // Try multiple queries to find the approval record
+        // IMPORTANT: training_approvals table doesn't have 'approved_at' column
+        // Use 'updated_at' instead (gets updated when approval_status changes to APPROVED)
+        // First try with plan_type='manual' (most reliable since we know this column exists)
+        let approval = await db('training_approvals')
+          .where({ plan_id: plan.id, plan_type: 'manual', approval_status: 'APPROVED' })
+          .orderBy('updated_at', 'desc')
+          .first();
+        
+        if (!approval) {
+          approval = await db('training_approvals')
+            .where({ plan_id: plan.id, source: 'manual', approval_status: 'APPROVED' })
+            .orderBy('updated_at', 'desc')
+            .first();
+        }
+        
+        if (!approval) {
+          approval = await db('training_approvals')
+            .where({ plan_id: plan.id, approval_status: 'APPROVED' })
+            .orderBy('updated_at', 'desc')
+            .first();
+        }
+        
+        if (approval) {
+          approval_id = approval.id;
+        }
+      } catch (approvalError) {
+        console.error('❌ Error fetching approval_id for manual plan:', approvalError);
+      }
+    }
+
+    return res.status(201).json({ success: true, data: { ...plan, approval_id } });
   } catch (err) {
     console.error('Error creating app manual training plan:', err);
     return res.status(500).json({ success: false, message: 'Failed to create manual training plan' });
@@ -196,7 +288,42 @@ exports.updatePlan = async (req, res) => {
       await smartUpdateManualPlanItems(id, items, userProgress, today);
     }
 
-    return res.json({ success: true, data: updated });
+    // Get approval_id if plan is approved
+    let approval_id = null;
+    if (updated.approval_status === 'APPROVED') {
+      try {
+        // Try multiple queries to find the approval record
+        // IMPORTANT: training_approvals table doesn't have 'approved_at' column
+        // Use 'updated_at' instead (gets updated when approval_status changes to APPROVED)
+        // First try with plan_type='manual' (most reliable since we know this column exists)
+        let approval = await db('training_approvals')
+          .where({ plan_id: id, plan_type: 'manual', approval_status: 'APPROVED' })
+          .orderBy('updated_at', 'desc')
+          .first();
+        
+        if (!approval) {
+          approval = await db('training_approvals')
+            .where({ plan_id: id, source: 'manual', approval_status: 'APPROVED' })
+            .orderBy('updated_at', 'desc')
+            .first();
+        }
+        
+        if (!approval) {
+          approval = await db('training_approvals')
+            .where({ plan_id: id, approval_status: 'APPROVED' })
+            .orderBy('updated_at', 'desc')
+            .first();
+        }
+        
+        if (approval) {
+          approval_id = approval.id;
+        }
+      } catch (approvalError) {
+        console.error('❌ Error fetching approval_id for manual plan:', approvalError);
+      }
+    }
+
+    return res.json({ success: true, data: { ...updated, approval_id } });
   } catch (err) {
     console.error('Error updating app manual training plan:', err);
     return res.status(500).json({ success: false, message: 'Failed to update manual training plan' });
@@ -214,7 +341,8 @@ exports.deletePlan = async (req, res) => {
         .where({ source_plan_id: id, plan_type: 'manual', user_id: existing.user_id, gym_id: existing.gym_id });
       const dailyPlanIds = dailyPlans.map(p => p.id);
       if (dailyPlanIds.length > 0) {
-        await db('daily_training_plan_items').whereIn('daily_plan_id', dailyPlanIds).del();
+        // Items are now stored in exercises_details JSON column
+        // No need to delete from daily_training_plan_items table
         await db('daily_training_plans').whereIn('id', dailyPlanIds).del();
       }
     } catch (mirrorErr) {
@@ -251,8 +379,49 @@ exports.getPlan = async (req, res) => {
     const plan = await query.first();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
     
+    // Get approval_id from training_approvals if plan is approved
+    let approval_id = null;
+    if (plan.approval_status === 'APPROVED') {
+      try {
+        // Try multiple queries to find the approval record
+        // IMPORTANT: training_approvals table doesn't have 'approved_at' column
+        // Use 'updated_at' instead (gets updated when approval_status changes to APPROVED)
+        // First try with plan_type='manual' (most reliable since we know this column exists)
+        let approval = await db('training_approvals')
+          .where({ plan_id: id, plan_type: 'manual', approval_status: 'APPROVED' })
+          .orderBy('updated_at', 'desc')
+          .first();
+        
+        // If not found, try with source='manual' (in case source column exists and is set)
+        if (!approval) {
+          approval = await db('training_approvals')
+            .where({ plan_id: id, source: 'manual', approval_status: 'APPROVED' })
+            .orderBy('updated_at', 'desc')
+            .first();
+        }
+        
+        // If still not found, try without plan_type/source filter (fallback)
+        if (!approval) {
+          approval = await db('training_approvals')
+            .where({ plan_id: id, approval_status: 'APPROVED' })
+            .orderBy('updated_at', 'desc')
+            .first();
+        }
+        
+        if (approval) {
+          approval_id = approval.id;
+          console.log(`✅ Found approval_id ${approval_id} for manual plan ${id} (plan_type: ${approval.plan_type || 'N/A'}, source: ${approval.source || 'N/A'})`);
+        } else {
+          console.log(`⚠️ No approval record found for approved manual plan ${id} (plan_id=${id}, approval_status=APPROVED)`);
+        }
+      } catch (approvalError) {
+        console.error('❌ Error fetching approval_id for manual plan:', approvalError);
+        // Continue without approval_id if lookup fails
+      }
+    }
+    
     const items = await db('app_manual_training_plan_items').where({ plan_id: id }).orderBy('id', 'asc');
-    return res.json({ success: true, data: { ...plan, items } });
+    return res.json({ success: true, data: { ...plan, items, approval_id } });
   } catch (err) {
     console.error('Error getting app manual training plan:', err);
     return res.status(500).json({ success: false, message: 'Failed to get manual training plan' });
@@ -283,7 +452,72 @@ exports.listPlans = async (req, res) => {
     }
     
     const plans = await qb;
-    return res.json({ success: true, data: plans });
+    
+    // Get all approval_ids for approved plans in a single query (more efficient)
+    const planIds = plans.map(p => p.id);
+    let approvalsMap = {};
+    
+    if (planIds.length > 0) {
+      try {
+        // Try multiple queries to find approval records
+        // IMPORTANT: training_approvals table doesn't have 'approved_at' column
+        // Use 'updated_at' instead (gets updated when approval_status changes to APPROVED)
+        // First try with plan_type='manual' (most reliable since we know this column exists)
+        let approvals = await db('training_approvals')
+          .whereIn('plan_id', planIds)
+          .where({ plan_type: 'manual', approval_status: 'APPROVED' })
+          .select('id', 'plan_id', 'updated_at', 'plan_type', 'source')
+          .orderBy('updated_at', 'desc');
+        
+        // If some plans don't have approvals with plan_type='manual', try with source='manual'
+        const foundPlanIds = approvals.map(a => a.plan_id);
+        const missingPlanIds = planIds.filter(id => !foundPlanIds.includes(id));
+        
+        if (missingPlanIds.length > 0) {
+          const additionalApprovals = await db('training_approvals')
+            .whereIn('plan_id', missingPlanIds)
+            .where({ source: 'manual', approval_status: 'APPROVED' })
+            .select('id', 'plan_id', 'updated_at', 'plan_type', 'source')
+            .orderBy('updated_at', 'desc');
+          
+          approvals = [...approvals, ...additionalApprovals];
+        }
+        
+        // If still missing, try without plan_type/source filter (fallback)
+        const stillMissingPlanIds = planIds.filter(id => !approvals.map(a => a.plan_id).includes(id));
+        if (stillMissingPlanIds.length > 0) {
+          const fallbackApprovals = await db('training_approvals')
+            .whereIn('plan_id', stillMissingPlanIds)
+            .where({ approval_status: 'APPROVED' })
+            .select('id', 'plan_id', 'updated_at', 'plan_type', 'source')
+            .orderBy('updated_at', 'desc');
+          
+          approvals = [...approvals, ...fallbackApprovals];
+        }
+        
+        // Group by plan_id and take the most recent approval for each plan
+        approvals.forEach(approval => {
+          if (!approvalsMap[approval.plan_id]) {
+            approvalsMap[approval.plan_id] = approval.id;
+          }
+        });
+        
+        if (Object.keys(approvalsMap).length > 0) {
+          console.log(`✅ Found ${Object.keys(approvalsMap).length} approval_ids for ${planIds.length} manual plans`);
+        }
+      } catch (approvalError) {
+        console.error('❌ Error fetching approval_ids for manual plans:', approvalError);
+        // Continue without approval_ids if lookup fails
+      }
+    }
+    
+    // Add approval_id to each plan
+    const plansWithApprovalId = plans.map(plan => ({
+      ...plan,
+      approval_id: plan.approval_status === 'APPROVED' ? (approvalsMap[plan.id] || null) : null
+    }));
+    
+    return res.json({ success: true, data: plansWithApprovalId });
   } catch (err) {
     console.error('Error listing app manual training plans:', err);
     return res.status(500).json({ success: false, message: 'Failed to list manual training plans' });

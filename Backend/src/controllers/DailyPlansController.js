@@ -53,12 +53,8 @@ async function generateDailyPlansFromExistingPlan(planType, sourcePlanId, user_i
           plan_type: 'manual', // or determine from source
           source_plan_id: sourcePlanId,
           plan_category: planData.exercise_plan_category || planData.category || 'General',
-          workout_name: planData.workout_name || 'Daily Workout',
-          total_exercises: planData.total_exercises || items.length,
-          training_minutes: planData.training_minutes || 0,
-          total_sets: items.reduce((sum, item) => sum + (item.sets || 0), 0),
-          total_reps: items.reduce((sum, item) => sum + (item.reps || 0), 0),
-          total_weight_kg: items.reduce((sum, item) => sum + (item.weight_kg || 0), 0),
+          // workout_name removed - can be derived from exercises_details if needed
+          // Totals are now calculated from exercises_details when needed
           user_level: planData.user_level || 'Beginner',
           exercises_details: JSON.stringify(items)
         });
@@ -166,12 +162,7 @@ exports.createDailyTrainingPlans = async (req, res) => {
           plan_type: plan_type || 'manual',
           source_plan_id: source_plan_id || null,
           plan_category,
-          workout_name: 'Daily Workout',
-          total_exercises: exerciseArray.length,
-          training_minutes: totalMinutes,
-          total_sets: totalSets,
-          total_reps: totalReps,
-          total_weight_kg: totalWeight,
+          // workout_name removed
           user_level: 'Beginner',
           exercises_details: JSON.stringify(exerciseArray)
         });
@@ -196,7 +187,8 @@ exports.createDailyTrainingPlans = async (req, res) => {
           notes: ex.notes || null
         }));
         
-        await db('daily_training_plan_items').insert(items);
+        // Items are now stored in exercises_details JSON column
+        // No need to insert into daily_training_plan_items table
       }
     }
     
@@ -307,12 +299,24 @@ exports.createDailyNutritionPlans = async (req, res) => {
 exports.getUserDailyPlans = async (req, res) => {
   try {
     const { user_id, start_date, end_date, plan_type } = req.query;
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
     
-    if (!user_id) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'user_id is required' 
-      });
+    // SECURITY: Ensure proper user isolation
+    let targetUserId;
+    if (requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer') {
+      // Admin/trainer can access specific user's plans in their gym
+      if (!user_id) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'user_id is required' 
+        });
+      }
+      targetUserId = Number(user_id);
+    } else {
+      // Regular users can only access their own plans
+      // Ignore user_id from query and use authenticated user's ID
+      targetUserId = requestingUserId;
     }
     
     const query = {};
@@ -323,7 +327,7 @@ exports.getUserDailyPlans = async (req, res) => {
     
     // Get training plans
     const trainingPlans = await db('daily_training_plans')
-      .where({ user_id })
+      .where({ user_id: targetUserId })
       .modify((queryBuilder) => {
         if (start_date) queryBuilder.where('plan_date', '>=', start_date);
         if (end_date) queryBuilder.where('plan_date', '<=', end_date);
@@ -333,7 +337,7 @@ exports.getUserDailyPlans = async (req, res) => {
     
     // Get nutrition plans
     const nutritionPlans = await db('daily_nutrition_plans')
-      .where({ user_id })
+      .where({ user_id: targetUserId })
       .modify((queryBuilder) => {
         if (start_date) queryBuilder.where('plan_date', '>=', start_date);
         if (end_date) queryBuilder.where('plan_date', '<=', end_date);
@@ -345,9 +349,24 @@ exports.getUserDailyPlans = async (req, res) => {
     const trainingPlanIds = trainingPlans.map(p => p.id);
     const nutritionPlanIds = nutritionPlans.map(p => p.id);
     
-    const trainingItems = trainingPlanIds.length > 0 
-      ? await db('daily_training_plan_items').whereIn('daily_plan_id', trainingPlanIds)
-      : [];
+    // Items are now stored in exercises_details JSON column
+    // Parse items from exercises_details for each plan
+    const trainingItems = [];
+    for (const plan of trainingPlans) {
+      try {
+        const details = plan.exercises_details;
+        if (details) {
+          const parsed = typeof details === 'string' ? JSON.parse(details) : details;
+          if (Array.isArray(parsed)) {
+            trainingItems.push(...parsed);
+          } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.workouts)) {
+            trainingItems.push(...parsed.workouts);
+          }
+        }
+      } catch (e) {
+        // Skip invalid JSON
+      }
+    }
     
     const nutritionItems = nutritionPlanIds.length > 0
       ? await db('daily_nutrition_plan_items').whereIn('daily_plan_id', nutritionPlanIds)
@@ -435,6 +454,18 @@ exports.updateDailyPlanCompletion = async (req, res) => {
         message: 'Plan not found' 
       });
     }
+
+    // Auto-sync user stats after completion (only for training plans)
+    if (plan_type === 'training' && is_completed) {
+      try {
+        const { updateUserStats } = require('../utils/statsCalculator');
+        await updateUserStats(updated.user_id);
+        console.log('✅ User stats synced automatically after plan completion');
+      } catch (statsErr) {
+        console.error('⚠️ Failed to auto-sync user stats:', statsErr);
+        // Don't fail the request if stats sync fails
+      }
+    }
     
     res.json({ 
       success: true, 
@@ -487,8 +518,21 @@ exports.getTodaysPlans = async (req, res) => {
     let nutritionItems = [];
     
     if (trainingPlan) {
-      trainingItems = await db('daily_training_plan_items')
-        .where({ daily_plan_id: trainingPlan.id });
+      // Items are now stored in exercises_details JSON column
+      // Parse items from exercises_details
+      try {
+        const details = trainingPlan.exercises_details;
+        if (details) {
+          const parsed = typeof details === 'string' ? JSON.parse(details) : details;
+          if (Array.isArray(parsed)) {
+            trainingItems = parsed;
+          } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.workouts)) {
+            trainingItems = parsed.workouts;
+          }
+        }
+      } catch (e) {
+        trainingItems = [];
+      }
     }
     
     if (nutritionPlan) {

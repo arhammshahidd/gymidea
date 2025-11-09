@@ -15,17 +15,33 @@ function calculateAverageIntensity(totalMinutes, exerciseCount) {
 }
 
 /**
- * Determine workout density based on average intensity
- * @param {number} avgIntensity - Average minutes per exercise
- * @returns {number} Number of workouts per day
+ * Determine workout density based on total minutes per day
+ * Rule: If total minutes per day > 80, show 1 workout/day
+ *       If total minutes per day <= 80, show 2 workouts/day
+ * @param {Array} exercises - Array of exercises
+ * @param {number} workoutsPerDay - Proposed number of workouts per day
+ * @returns {number} Number of workouts per day (adjusted based on 80-minute rule)
  */
-function getWorkoutDensity(avgIntensity) {
-  if (avgIntensity < 50) {
-    return 3; // Low intensity: 3 workouts/day
-  } else if (avgIntensity >= 50 && avgIntensity < 80) {
-    return 2; // Medium intensity: 2 workouts/day
+function getWorkoutDensity(exercises, workoutsPerDay = 2) {
+  // Calculate average minutes per exercise
+  const totalMinutes = exercises.reduce((sum, exercise) => {
+    return sum + (exercise.training_minutes || exercise.minutes || 0);
+  }, 0);
+  
+  if (exercises.length === 0) return 1;
+  
+  const avgMinutesPerExercise = totalMinutes / exercises.length;
+  
+  // Calculate total minutes if we use the proposed workoutsPerDay
+  // Estimate: if we have N exercises and want X workouts/day, we'll distribute them
+  // For simplicity, calculate based on average minutes per exercise
+  const estimatedTotalMinutesPerDay = avgMinutesPerExercise * workoutsPerDay;
+  
+  // Apply the 80-minute rule
+  if (estimatedTotalMinutesPerDay > 80) {
+    return 1; // If exceeding 80 minutes, use 1 workout/day
   } else {
-    return 1; // High intensity: 1 workout/day
+    return 2; // If <= 80 minutes, use 2 workouts/day
   }
 }
 
@@ -53,20 +69,36 @@ function distributeExercises(exercises, totalDays, workoutsPerDay) {
     const dayRotationOffset = ((day - 1) * workoutsPerDay) % exercises.length;
     let currentExerciseIndex = dayRotationOffset;
 
-    // Add workouts for this day
-    for (let workout = 0; workout < workoutsPerDay && dayWorkouts.length < 3; workout++) {
+    // Add workouts for this day - enforce 80-minute rule
+    const MAX_MINUTES_PER_DAY = 80;
+    let dayTotalMinutes = 0;
+    let shouldStop = false; // Flag to stop adding workouts
+    
+    for (let workout = 0; workout < workoutsPerDay && !shouldStop; workout++) {
+      // Check if adding another workout would exceed 80 minutes
+      if (dayTotalMinutes >= MAX_MINUTES_PER_DAY && dayWorkouts.length > 0) {
+        shouldStop = true; // Stop adding workouts if we've reached 80 minutes
+        break;
+      }
+      
       // Find next available exercise (round-robin with rotation offset and no repetition within same day)
       let attempts = 0;
       let selectedExercise = null;
       let startIndex = currentExerciseIndex;
       
-      while (attempts < exercises.length && !selectedExercise) {
+      while (attempts < exercises.length && !selectedExercise && !shouldStop) {
         const currentIndex = (startIndex + attempts) % exercises.length;
         const exercise = exercises[currentIndex];
         const exerciseId = exercise.id || exercise.name || exercise.workout_name || currentIndex;
         
         // Check if this exercise is already used in this day
         if (!usedExerciseIds.has(exerciseId)) {
+          const exerciseMinutes = exercise.training_minutes || exercise.minutes || 0;
+          // Check if adding this exercise would exceed 80 minutes
+          if (dayTotalMinutes + exerciseMinutes > MAX_MINUTES_PER_DAY && dayWorkouts.length > 0) {
+            shouldStop = true; // Stop if adding would exceed 80 minutes and we already have at least 1 workout
+            break;
+          }
           selectedExercise = exercise;
           usedExerciseIds.add(exerciseId);
           currentExerciseIndex = (currentIndex + 1) % exercises.length;
@@ -78,17 +110,28 @@ function distributeExercises(exercises, totalDays, workoutsPerDay) {
 
       // If we couldn't find a unique exercise and we have fewer exercises than workouts per day,
       // we need to repeat some exercises (but still try to minimize repetition)
-      if (!selectedExercise && exercises.length > 0) {
+      if (!selectedExercise && !shouldStop && exercises.length > 0) {
         // Use the exercise that was used least recently in this day
         const leastUsedIndex = (currentExerciseIndex) % exercises.length;
-        selectedExercise = exercises[leastUsedIndex];
-        currentExerciseIndex = (leastUsedIndex + 1) % exercises.length;
-        // Add to used set to track repetition
-        usedExerciseIds.add(selectedExercise.id || selectedExercise.name || selectedExercise.workout_name || leastUsedIndex);
+        const candidateExercise = exercises[leastUsedIndex];
+        const candidateMinutes = candidateExercise.training_minutes || candidateExercise.minutes || 0;
+        
+        // Check if adding this exercise would exceed 80 minutes
+        if (dayTotalMinutes + candidateMinutes <= MAX_MINUTES_PER_DAY || dayWorkouts.length === 0) {
+          selectedExercise = candidateExercise;
+          currentExerciseIndex = (leastUsedIndex + 1) % exercises.length;
+          // Add to used set to track repetition
+          usedExerciseIds.add(selectedExercise.id || selectedExercise.name || selectedExercise.workout_name || leastUsedIndex);
+        } else {
+          shouldStop = true; // Stop if adding would exceed 80 minutes
+          break;
+        }
       }
 
-      if (selectedExercise) {
+      if (selectedExercise && !shouldStop) {
+        const exerciseMinutes = selectedExercise.training_minutes || selectedExercise.minutes || 0;
         dayWorkouts.push(selectedExercise);
+        dayTotalMinutes += exerciseMinutes;
       }
     }
 
@@ -139,15 +182,36 @@ function createDistributedPlan(planData, startDate, endDate) {
     };
   }
 
-  // Calculate average intensity
+  // Calculate total minutes for all exercises
   const totalMinutes = exercises.reduce((sum, exercise) => {
     return sum + (exercise.training_minutes || exercise.minutes || 0);
   }, 0);
   
   const avgIntensity = calculateAverageIntensity(totalMinutes, exercises.length);
   
-  // Determine workout density
-  const workoutsPerDay = getWorkoutDensity(avgIntensity);
+  // Determine workout density based on 80-minute rule
+  // Calculate average minutes per exercise
+  const avgMinutesPerExercise = exercises.length > 0 ? totalMinutes / exercises.length : 0;
+  
+  // Estimate total minutes per day with 2 workouts
+  // If we have 2 exercises and each is 45 minutes, that's 90 minutes total (> 80)
+  // So we need to check: if avgMinutesPerExercise * 2 > 80, use 1 workout
+  const estimatedMinutesWith2Workouts = avgMinutesPerExercise * 2;
+  
+  // Apply 80-minute rule: if > 80 minutes with 2 workouts, use 1 workout
+  // IMPORTANT: The rule is based on PER DAY total minutes, not per workout
+  // If 2 workouts would exceed 80 minutes total, use 1 workout
+  // If 2 workouts <= 80 minutes total, use 2 workouts
+  let workoutsPerDay;
+  if (estimatedMinutesWith2Workouts > 80) {
+    workoutsPerDay = 1; // If 2 workouts would exceed 80 minutes, use 1 workout
+    console.log(`80-minute rule applied: ${estimatedMinutesWith2Workouts.toFixed(1)} minutes with 2 workouts > 80, using 1 workout/day`);
+  } else {
+    workoutsPerDay = 2; // If 2 workouts <= 80 minutes, use 2 workouts
+    console.log(`80-minute rule applied: ${estimatedMinutesWith2Workouts.toFixed(1)} minutes with 2 workouts <= 80, using 2 workouts/day`);
+  }
+  
+  console.log(`Distribution calculation: totalMinutes=${totalMinutes}, avgMinutesPerExercise=${avgMinutesPerExercise.toFixed(1)}, estimatedWith2Workouts=${estimatedMinutesWith2Workouts.toFixed(1)}, workoutsPerDay=${workoutsPerDay}`);
   
   // Distribute exercises
   const dailyPlans = distributeExercises(exercises, totalDays, workoutsPerDay);

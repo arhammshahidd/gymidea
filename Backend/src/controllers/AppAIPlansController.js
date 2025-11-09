@@ -197,43 +197,74 @@ Return ONLY the JSON object with the items array.
   const callGemini = async (model) => {
     const modelId = String(model).startsWith('models/') ? String(model).slice(7) : String(model);
     const url = `${GEMINI_API_BASE}/${GEMINI_API_VERSION}/models/${modelId}:generateContent`;
-    const response = await axios.post(
-      url,
-      {
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 16384  // Increased from 8192 to handle larger responses
-        },
-        // keep default safety settings
-      },
-      { headers: { 'Content-Type': 'application/json' }, params: { key: GEMINI_API_KEY } }
-    );
-    const promptFeedback = response?.data?.promptFeedback;
-    const candidates = response?.data?.candidates || [];
-    const content = candidates?.[0]?.content || {};
-    const parts = content?.parts || [];
-    if (!parts.length) {
-      console.error('Gemini returned no parts. promptFeedback:', promptFeedback, 'safetyRatings:', candidates?.[0]?.safetyRatings);
-      throw new Error('Gemini returned empty content');
-    }
-    const text = parts.map(p => (typeof p?.text === 'string' ? p.text : '')).join('\n');
+    
+    // IMPORTANT: Add timeout to prevent connection resets
+    // Set timeout to 60 seconds (60000ms) for AI generation
+    const timeout = 60000;
+    
     try {
-      return parseItemsFromText(text);
-    } catch (e) {
-      const preview = (text || '').slice(0, 500);
-      const shape = {
-        hasCandidates: Array.isArray(response?.data?.candidates),
-        numParts: parts.length,
-        partTypes: parts.map(p => (p && Object.keys(p)) || [])
-      };
-      console.error('Gemini parse failure preview:', preview);
-      console.error('Gemini response shape:', shape);
-      console.error('Gemini response length:', text.length);
-      console.error('Parse error:', e.message);
-      throw e;
+      const response = await axios.post(
+        url,
+        {
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 16384  // Increased from 8192 to handle larger responses
+          },
+          // keep default safety settings
+        },
+        { 
+          headers: { 'Content-Type': 'application/json' }, 
+          params: { key: GEMINI_API_KEY },
+          timeout: timeout  // Add timeout to prevent hanging requests
+        }
+      );
+      
+      const promptFeedback = response?.data?.promptFeedback;
+      const candidates = response?.data?.candidates || [];
+      const content = candidates?.[0]?.content || {};
+      const parts = content?.parts || [];
+      if (!parts.length) {
+        console.error('Gemini returned no parts. promptFeedback:', promptFeedback, 'safetyRatings:', candidates?.[0]?.safetyRatings);
+        throw new Error('Gemini returned empty content');
+      }
+      const text = parts.map(p => (typeof p?.text === 'string' ? p.text : '')).join('\n');
+      try {
+        return parseItemsFromText(text);
+      } catch (e) {
+        const preview = (text || '').slice(0, 500);
+        const shape = {
+          hasCandidates: Array.isArray(response?.data?.candidates),
+          numParts: parts.length,
+          partTypes: parts.map(p => (p && Object.keys(p)) || [])
+        };
+        console.error('Gemini parse failure preview:', preview);
+        console.error('Gemini response shape:', shape);
+        console.error('Gemini response length:', text.length);
+        console.error('Parse error:', e.message);
+        throw e;
+      }
+    } catch (axiosError) {
+      // Handle timeout and connection errors specifically
+      if (axiosError.code === 'ECONNABORTED' || axiosError.message?.includes('timeout')) {
+        console.error(`❌ Gemini API timeout after ${timeout}ms for model: ${modelId}`);
+        throw new Error(`AI generation timed out. Please try again with a shorter plan duration.`);
+      } else if (axiosError.code === 'ECONNRESET' || axiosError.code === 'ETIMEDOUT') {
+        console.error(`❌ Gemini API connection error for model: ${modelId}`, axiosError.message);
+        throw new Error(`Connection to AI service was reset. Please try again.`);
+      } else if (axiosError.response) {
+        // HTTP error response from Gemini
+        const status = axiosError.response.status;
+        const data = axiosError.response.data;
+        console.error(`❌ Gemini API HTTP error ${status} for model: ${modelId}`, data);
+        throw new Error(`AI service returned error: HTTP ${status}`);
+      } else {
+        // Other axios errors
+        console.error(`❌ Gemini API request error for model: ${modelId}`, axiosError.message);
+        throw new Error(`Failed to connect to AI service: ${axiosError.message}`);
+      }
     }
   };
 
@@ -347,6 +378,24 @@ exports.createRequest = async (req, res) => {
       const items = Array.isArray(req.body.items) ? req.body.items : (Array.isArray(req.body.plan?.items) ? req.body.plan.items : []);
 
       if (startDate && endDate && category) {
+        // Generate daily plans if items are provided
+        let dailyPlans = null;
+        if (Array.isArray(items) && items.length > 0) {
+          try {
+            const { createDistributedPlan } = require('../utils/exerciseDistribution');
+            const distributedPlan = createDistributedPlan(
+              { items },
+              new Date(startDate),
+              new Date(endDate)
+            );
+            dailyPlans = distributedPlan.daily_plans;
+            console.log(`✅ Generated ${dailyPlans?.length || 0} daily plans for AI plan request`);
+          } catch (distError) {
+            console.error('❌ Failed to generate daily plans for AI plan request:', distError);
+            // Continue without daily_plans if generation fails
+          }
+        }
+
         const [planRow] = await db('app_ai_generated_plans')
           .insert({
             request_id: request.id,
@@ -358,6 +407,7 @@ exports.createRequest = async (req, res) => {
             total_workouts: coerceNumber(totalWorkouts, 0),
             training_minutes: coerceNumber(totalMinutes, 0),
             exercises_details: Array.isArray(items) && items.length > 0 ? JSON.stringify(items) : null,
+            daily_plans: Array.isArray(dailyPlans) && dailyPlans.length > 0 ? JSON.stringify(dailyPlans) : null,
           })
           .returning('*');
 
@@ -365,21 +415,31 @@ exports.createRequest = async (req, res) => {
         if (Array.isArray(items) && items.length) {
           const rows = items.map((it) => {
             const workoutName = coerceString(it.workout_name || it.name, 'Workout');
-            const weight = coerceNumber(it.weight_kg ?? it.weight, 0);
             const minutes = coerceNumber(it.minutes ?? it.training_minutes, 0);
             const exerciseTypes = Array.isArray(it.exercise_types)
               ? it.exercise_types.map(String).join(', ')
               : coerceString(it.exercise_types, undefined);
+            
+            // Handle weight ranges: calculate average if both min and max are provided
+            const min = coerceNumber(it.weight_min_kg, undefined);
+            const max = coerceNumber(it.weight_max_kg, undefined);
+            const avg = Number.isFinite(min) && Number.isFinite(max)
+              ? Math.round(((min + max) / 2) * 100) / 100
+              : coerceNumber(it.weight_kg ?? it.weight, 0);
+            
             const row = {
               plan_id: planRow.id,
               workout_name: workoutName,
               sets: coerceNumber(it.sets, 0),
               reps: coerceNumber(it.reps, 0),
-              weight_kg: weight,
+              weight_kg: avg,
               minutes,
               user_level: it.user_level || 'Beginner',
             };
             if (exerciseTypes !== undefined) row.exercise_types = exerciseTypes;
+            // Include weight ranges if provided
+            if (Number.isFinite(min)) row.weight_min_kg = min;
+            if (Number.isFinite(max)) row.weight_max_kg = max;
             return row;
           });
           if (rows.length) await db('app_ai_generated_plan_items').insert(rows);
@@ -486,44 +546,78 @@ exports.createGeneratedPlan = async (req, res) => {
       
       try {
         // Generate items using Gemini AI - this is the only method
-        generatedItems = await generateWorkoutItemsWithGemini({
-          exercise_plan_category,
-          start_date,
-          end_date,
-          age,
-          height_cm,
-          weight_kg,
-          gender,
-          future_goal,
-          user_level,
-          plan_duration_days
-        });
+        // Wrap in try-catch with timeout handling
+        generatedItems = await Promise.race([
+          generateWorkoutItemsWithGemini({
+            exercise_plan_category,
+            start_date,
+            end_date,
+            age,
+            height_cm,
+            weight_kg,
+            gender,
+            future_goal,
+            user_level,
+            plan_duration_days
+          }),
+          // Add an additional timeout wrapper (70 seconds, slightly longer than axios timeout)
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('AI generation timed out after 70 seconds')), 70000)
+          )
+        ]);
+        
         // Enforce single-muscle workout_name and expand combined labels
         generatedItems = normalizeAndExpandWorkoutItems(generatedItems);
         
         console.log(`✅ Gemini AI generated ${generatedItems.length} workout items`);
       } catch (geminiError) {
         console.error('❌ Gemini AI generation failed:', geminiError.message);
+        console.error('❌ Full error:', geminiError);
+        
+        // Check if it's a timeout or connection error
+        const isTimeout = geminiError.message?.includes('timeout') || 
+                         geminiError.message?.includes('timed out') ||
+                         geminiError.code === 'ECONNABORTED' ||
+                         geminiError.code === 'ETIMEDOUT';
+        
+        const isConnectionError = geminiError.message?.includes('Connection') ||
+                                 geminiError.message?.includes('reset') ||
+                                 geminiError.code === 'ECONNRESET' ||
+                                 geminiError.code === 'ECONNREFUSED';
         
         // Check if it's a server/API issue vs other errors
-        const isServerIssue = geminiError.message.includes('503') || 
-                             geminiError.message.includes('502') || 
-                             geminiError.message.includes('504') ||
-                             geminiError.message.includes('Service Unavailable') ||
-                             geminiError.message.includes('Bad Gateway') ||
-                             geminiError.message.includes('Gateway Timeout');
+        const isServerIssue = geminiError.message?.includes('503') || 
+                             geminiError.message?.includes('502') || 
+                             geminiError.message?.includes('504') ||
+                             geminiError.message?.includes('Service Unavailable') ||
+                             geminiError.message?.includes('Bad Gateway') ||
+                             geminiError.message?.includes('Gateway Timeout');
         
-        if (isServerIssue) {
+        if (isTimeout) {
+          return res.status(504).json({
+            success: false,
+            error: 'AI generation timed out. The plan duration may be too long. Please try with a shorter duration (30-60 days).',
+            error_code: 'GENERATION_TIMEOUT',
+            retry_after: 60
+          });
+        } else if (isConnectionError) {
           return res.status(503).json({
             success: false,
-            error: 'Try again later. Server is under repair.',
+            error: 'Connection to AI service was reset. Please try again in a moment.',
+            error_code: 'CONNECTION_ERROR',
+            retry_after: 30
+          });
+        } else if (isServerIssue) {
+          return res.status(503).json({
+            success: false,
+            error: 'AI service is temporarily unavailable. Please try again later.',
             error_code: 'SERVICE_UNAVAILABLE',
             retry_after: 300 // 5 minutes
           });
         } else {
           return res.status(500).json({
             success: false,
-            error: `Failed to generate AI workout plan: ${geminiError.message}`,
+            error: `Failed to generate AI workout plan: ${geminiError.message || 'Unknown error'}`,
             error_code: 'GENERATION_FAILED'
           });
         }
@@ -545,6 +639,22 @@ exports.createGeneratedPlan = async (req, res) => {
     const finalTotalWorkouts = total_workouts > 0 ? total_workouts : calculatedTotalWorkouts;
     const finalTrainingMinutes = training_minutes > 0 ? training_minutes : calculatedTrainingMinutes;
 
+    // Generate daily plans using distribution logic and store in daily_plans column
+    let dailyPlans = null;
+    try {
+      const { createDistributedPlan } = require('../utils/exerciseDistribution');
+      const distributedPlan = createDistributedPlan(
+        { items: generatedItems },
+        new Date(start_date),
+        new Date(end_date)
+      );
+      dailyPlans = distributedPlan.daily_plans;
+      console.log(`✅ Generated ${dailyPlans?.length || 0} daily plans for AI plan`);
+    } catch (distError) {
+      console.error('❌ Failed to generate daily plans for AI plan:', distError);
+      // Continue without daily_plans if generation fails
+    }
+
     // Create the plan in the database
     const [planRow] = await db('app_ai_generated_plans')
       .insert({
@@ -557,6 +667,7 @@ exports.createGeneratedPlan = async (req, res) => {
         total_workouts: finalTotalWorkouts,
         training_minutes: finalTrainingMinutes,
         exercises_details: generatedItems.length > 0 ? JSON.stringify(generatedItems) : null,
+        daily_plans: Array.isArray(dailyPlans) && dailyPlans.length > 0 ? JSON.stringify(dailyPlans) : null,
       })
       .returning('*');
 
@@ -584,6 +695,15 @@ exports.createGeneratedPlan = async (req, res) => {
       });
       
       await db('app_ai_generated_plan_items').insert(rows);
+    }
+
+    // Sync daily plans from AI plan to daily_training_plans (similar to assigned plans)
+    try {
+      const { syncDailyPlansFromAIPlanHelper } = require('./DailyTrainingController');
+      await syncDailyPlansFromAIPlanHelper(planRow.id);
+    } catch (syncError) {
+      console.error('Failed to sync daily plans from AI plan:', syncError);
+      // Don't fail the main request if sync fails
     }
 
     // Return the response in the exact format expected by Flutter app

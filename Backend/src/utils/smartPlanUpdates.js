@@ -1,5 +1,45 @@
 const db = require('../config/db');
 
+// Helper function to parse weight_kg string ranges like "20-40" into min, max, and average
+function parseWeightRange(weightValue) {
+  if (!weightValue) return { weight_kg: 0, weight_min_kg: null, weight_max_kg: null };
+  
+  // If it's already a number, return as is
+  if (typeof weightValue === 'number' || (!isNaN(weightValue) && !String(weightValue).includes('-'))) {
+    const num = Number(weightValue);
+    return { 
+      weight_kg: num, 
+      weight_min_kg: null, 
+      weight_max_kg: null 
+    };
+  }
+  
+  // If it's a string range like "20-40", parse it
+  if (typeof weightValue === 'string' && weightValue.includes('-')) {
+    const parts = weightValue.split('-').map(p => p.trim()).filter(p => p);
+    if (parts.length === 2) {
+      const min = Number(parts[0]);
+      const max = Number(parts[1]);
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        const avg = Math.round(((min + max) / 2) * 100) / 100;
+        return { 
+          weight_kg: avg, 
+          weight_min_kg: min, 
+          weight_max_kg: max 
+        };
+      }
+    }
+  }
+  
+  // Fallback: try to parse as number
+  const num = Number(weightValue);
+  return { 
+    weight_kg: Number.isFinite(num) ? num : 0, 
+    weight_min_kg: null, 
+    weight_max_kg: null 
+  };
+}
+
 // Helper function to get user progress for a plan
 async function getUserProgressForPlan(userId, planId) {
   try {
@@ -42,17 +82,26 @@ async function smartUpdateMobilePlanItems(planId, newExercises, userProgress, to
       // No existing items, just insert new ones
       console.log('📝 No existing items, inserting all new exercises');
       if (Array.isArray(newExercises) && newExercises.length) {
-        const rows = newExercises.map((ex) => ({
-          plan_id: planId,
-          workout_name: ex.name || ex.workout_name,
-          exercise_plan_category: ex.exercise_plan_category || null,
-          exercise_types: ex.exercise_types ?? null,
-          sets: Number(ex.sets || 0),
-          reps: Number(ex.reps || 0),
-          weight_kg: Number(ex.weight_kg ?? ex.weight ?? 0),
-          minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
-          user_level: ex.user_level || 'Beginner',
-        }));
+        const rows = newExercises.map((ex) => {
+          // Parse weight range from string like "20-40" or separate min/max fields
+          const weightRange = parseWeightRange(ex.weight_kg ?? ex.weight);
+          
+          return {
+            plan_id: planId,
+            workout_name: ex.name || ex.workout_name,
+            exercise_plan_category: ex.exercise_plan_category || null,
+            exercise_types: ex.exercise_types ?? null,
+            sets: Number(ex.sets || 0),
+            reps: Number(ex.reps || 0),
+            weight_kg: ex.weight_min_kg != null && ex.weight_max_kg != null 
+              ? parseWeightRange(`${ex.weight_min_kg}-${ex.weight_max_kg}`).weight_kg
+              : weightRange.weight_kg,
+            weight_min_kg: ex.weight_min_kg ?? weightRange.weight_min_kg,
+            weight_max_kg: ex.weight_max_kg ?? weightRange.weight_max_kg,
+            minutes: Number(ex.training_minutes ?? ex.minutes ?? 0),
+            user_level: ex.user_level || 'Beginner',
+          };
+        });
         await db('app_manual_training_plan_items').insert(rows);
       }
       return;
@@ -135,20 +184,30 @@ async function smartUpdateAIPlanItems(planId, newExercises, userProgress, today)
       if (Array.isArray(newExercises) && newExercises.length) {
         const rows = newExercises.map((it) => {
           const workoutName = it.workout_name || it.name;
-          const weight = it.weight_kg ?? it.weight ?? 0;
           const minutes = it.minutes ?? it.training_minutes ?? 0;
+          
+          // Handle weight ranges: calculate average if both min and max are provided
+          const min = it.weight_min_kg != null ? Number(it.weight_min_kg) : undefined;
+          const max = it.weight_max_kg != null ? Number(it.weight_max_kg) : undefined;
+          const avg = Number.isFinite(min) && Number.isFinite(max)
+            ? Math.round(((min + max) / 2) * 100) / 100
+            : Number(it.weight_kg ?? it.weight ?? 0);
+          
           const row = { 
             plan_id: planId, 
             workout_name: workoutName, 
             sets: it.sets || 0, 
             reps: it.reps || 0, 
-            weight_kg: weight, 
+            weight_kg: avg, 
             minutes, 
             user_level: it.user_level || 'Beginner' 
           };
           if (it.exercise_types !== undefined && it.exercise_types !== null && it.exercise_types !== '') {
             row.exercise_types = it.exercise_types;
           }
+          // Include weight ranges if provided
+          if (Number.isFinite(min)) row.weight_min_kg = min;
+          if (Number.isFinite(max)) row.weight_max_kg = max;
           return row;
         });
         await db('app_ai_generated_plan_items').insert(rows);
@@ -205,19 +264,28 @@ async function smartUpdateAIPlanItems(planId, newExercises, userProgress, today)
         .where({ plan_id: planId })
         .del();
       
-      // Insert new items
-      const rows = newExercises.map((it) => ({
-        plan_id: planId,
-        workout_name: it.workout_name || it.name,
-        exercise_types: it.exercise_types || null,
-        sets: Number(it.sets || 0),
-        reps: Number(it.reps || 0),
-        weight_kg: Number(it.weight_kg || 0),
-        minutes: Number(it.minutes || 0),
-        user_level: it.user_level || 'Beginner',
-        weight_min_kg: it.weight_min_kg || null,
-        weight_max_kg: it.weight_max_kg || null,
-      }));
+      // Insert new items with weight range calculation
+      const rows = newExercises.map((it) => {
+        // Handle weight ranges: calculate average if both min and max are provided
+        const min = it.weight_min_kg != null ? Number(it.weight_min_kg) : undefined;
+        const max = it.weight_max_kg != null ? Number(it.weight_max_kg) : undefined;
+        const avg = Number.isFinite(min) && Number.isFinite(max)
+          ? Math.round(((min + max) / 2) * 100) / 100
+          : Number(it.weight_kg || 0);
+        
+        return {
+          plan_id: planId,
+          workout_name: it.workout_name || it.name,
+          exercise_types: it.exercise_types || null,
+          sets: Number(it.sets || 0),
+          reps: Number(it.reps || 0),
+          weight_kg: avg,
+          minutes: Number(it.minutes || 0),
+          user_level: it.user_level || 'Beginner',
+          weight_min_kg: Number.isFinite(min) ? min : null,
+          weight_max_kg: Number.isFinite(max) ? max : null,
+        };
+      });
       
       if (rows.length > 0) {
         await db('app_ai_generated_plan_items').insert(rows);
@@ -247,17 +315,26 @@ async function smartUpdateManualPlanItems(planId, newExercises, userProgress, to
       // No existing items, just insert new ones
       console.log('📝 No existing manual items, inserting all new exercises');
       if (Array.isArray(newExercises) && newExercises.length) {
-        const rows = newExercises.map((it) => ({
-          plan_id: planId,
-          workout_name: it.workout_name,
-          exercise_plan_category: it.exercise_plan_category || null,
-          exercise_types: it.exercise_types || null,
-          sets: it.sets || 0,
-          reps: it.reps || 0,
-          weight_kg: it.weight_kg || 0,
-          minutes: it.minutes || 0,
-          user_level: it.user_level || 'Beginner',
-        }));
+        const rows = newExercises.map((it) => {
+          // Parse weight range from string like "20-40" or separate min/max fields
+          const weightRange = parseWeightRange(it.weight_kg ?? it.weight);
+          
+          return {
+            plan_id: planId,
+            workout_name: it.workout_name,
+            exercise_plan_category: it.exercise_plan_category || null,
+            exercise_types: it.exercise_types || null,
+            sets: it.sets || 0,
+            reps: it.reps || 0,
+            weight_kg: it.weight_min_kg != null && it.weight_max_kg != null 
+              ? parseWeightRange(`${it.weight_min_kg}-${it.weight_max_kg}`).weight_kg
+              : weightRange.weight_kg,
+            weight_min_kg: it.weight_min_kg ?? weightRange.weight_min_kg,
+            weight_max_kg: it.weight_max_kg ?? weightRange.weight_max_kg,
+            minutes: it.minutes || 0,
+            user_level: it.user_level || 'Beginner',
+          };
+        });
         await db('app_manual_training_plan_items').insert(rows);
       }
       return;

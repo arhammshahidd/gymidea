@@ -542,6 +542,13 @@
                       <div class="text-body2 text-weight-medium">{{ plan.user_level || 'N/A' }}</div>
                     </div>
                  </div>
+                 <div class="col-12" v-if="getDistributionSummary(plan)">
+                   <div class="detail-item">
+                     <q-icon name="calendar_view_week" color="primary" size="16px" class="q-mr-xs" />
+                     <span class="text-caption text-grey-6">Distribution</span>
+                     <div class="text-body2 text-weight-medium">{{ getDistributionSummary(plan) }}</div>
+                   </div>
+                 </div>
                </div>
              </div>
           </q-card-section>
@@ -1433,6 +1440,52 @@
           </div>
         </div>
 
+          <div class="daily-distribution" v-if="parsedDailyPlans && parsedDailyPlans.length > 0">
+            <h4>Daily Distribution</h4>
+            <div class="distribution-container">
+              <q-card 
+                v-for="(dayPlan, index) in parsedDailyPlans" 
+                :key="index"
+                class="day-plan-card q-mb-sm"
+                flat
+                bordered
+              >
+                <q-card-section class="day-plan-header">
+                  <div class="row items-center justify-between">
+                    <div>
+                      <div class="text-subtitle2 text-weight-bold">Day {{ dayPlan.day || index + 1 }}</div>
+                      <div class="text-caption text-grey-6">{{ formatDate(dayPlan.date) }}</div>
+                    </div>
+                    <div class="day-stats">
+                      <q-badge color="primary" :label="`${dayPlan.total_workouts || 0} workouts`" />
+                      <q-badge color="secondary" class="q-ml-xs" :label="`${dayPlan.total_minutes || 0} min`" />
+                    </div>
+                  </div>
+                </q-card-section>
+                <q-card-section class="q-pt-none" v-if="dayPlan.workouts && dayPlan.workouts.length > 0">
+                  <div class="workouts-list">
+                    <div 
+                      v-for="(workout, wIndex) in dayPlan.workouts" 
+                      :key="wIndex"
+                      class="workout-item q-mb-xs"
+                    >
+                      <div class="row items-center justify-between">
+                        <div class="workout-name">
+                          <q-icon name="fitness_center" size="14px" class="q-mr-xs" />
+                          <span class="text-body2">{{ workout.workout_name || workout.name || `Workout ${wIndex + 1}` }}</span>
+                        </div>
+                        <div class="workout-details">
+                          <span class="text-caption text-grey-6 q-mr-sm">{{ workout.sets || 0 }} sets × {{ workout.reps || 0 }} reps</span>
+                          <span class="text-caption text-grey-6" v-if="workout.weight_kg || workout.weight">{{ workout.weight_kg || workout.weight || 0 }} kg</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </q-card-section>
+              </q-card>
+            </div>
+          </div>
+
           <div class="exercise-distribution" v-if="viewingPlan.exercises && viewingPlan.exercises.length > 0">
             <h4>Exercise Distribution</h4>
             <div class="distribution-grid">
@@ -1813,9 +1866,23 @@ const viewTrainingPlanDetails = async (plan) => {
         }
       }
       
+      // Parse daily_plans if it exists
+      let dailyPlans = []
+      if (planData.daily_plans) {
+        try {
+          dailyPlans = typeof planData.daily_plans === 'string' 
+            ? JSON.parse(planData.daily_plans) 
+            : planData.daily_plans
+          console.log('Parsed daily plans:', dailyPlans)
+        } catch (e) {
+          console.error('Error parsing daily plans:', e)
+        }
+      }
+      
       viewingPlan.value = {
         ...planData,
-        exercises: exercises
+        exercises: exercises,
+        daily_plans: dailyPlans
       }
       showViewPlanDialog.value = true
     }
@@ -1824,9 +1891,42 @@ const viewTrainingPlanDetails = async (plan) => {
     // Fallback to local data
     viewingPlan.value = {
       ...plan,
-      exercises: plan.exercises || []
+      exercises: plan.exercises || [],
+      daily_plans: plan.daily_plans || []
     }
     showViewPlanDialog.value = true
+  }
+}
+
+// Computed property to parse daily plans for display
+const parsedDailyPlans = computed(() => {
+  if (!viewingPlan.value.daily_plans) return []
+  try {
+    return typeof viewingPlan.value.daily_plans === 'string' 
+      ? JSON.parse(viewingPlan.value.daily_plans) 
+      : viewingPlan.value.daily_plans
+  } catch (e) {
+    return []
+  }
+})
+
+// Helper function to get distribution summary for cards
+const getDistributionSummary = (plan) => {
+  if (!plan.daily_plans) return null
+  try {
+    const dailyPlans = typeof plan.daily_plans === 'string' 
+      ? JSON.parse(plan.daily_plans) 
+      : plan.daily_plans
+    
+    if (!Array.isArray(dailyPlans) || dailyPlans.length === 0) return null
+    
+    const totalDays = dailyPlans.length
+    const avgWorkouts = dailyPlans.reduce((sum, day) => sum + (day.total_workouts || 0), 0) / totalDays
+    const workoutsPerDay = Math.round(avgWorkouts * 10) / 10
+    
+    return `${totalDays} days, ${workoutsPerDay} workouts/day`
+  } catch (e) {
+    return null
   }
 }
 
@@ -1955,6 +2055,18 @@ const createPlan = async () => {
     
     console.log('Generated workout name:', workoutName)
 
+    // Prepare items array for distribution (backend will generate daily_plans)
+    const items = newPlan.value.exercises && newPlan.value.exercises.length > 0
+      ? newPlan.value.exercises.map(ex => ({
+          workout_name: ex.name,
+          sets: ex.sets || 0,
+          reps: ex.reps || 0,
+          weight_kg: ex.weight_kg || 0,
+          minutes: ex.minutes || 0,
+          exercise_types: ex.exercise_types || 0
+        }))
+      : []
+
     // Ensure all numeric fields are properly converted
     const planData = {
       start_date: newPlan.value.start_date,
@@ -1970,6 +2082,7 @@ const createPlan = async () => {
       total_workouts: newPlan.value.total_workouts ? parseInt(newPlan.value.total_workouts) : 0,
       total_exercises: newPlan.value.total_exercises ? parseInt(newPlan.value.total_exercises) : 0,
       status: newPlan.value.status || 'PLANNED',
+      items: items, // Send items array to trigger distribution logic
       exercises_details: newPlan.value.exercises && newPlan.value.exercises.length > 0 
         ? JSON.stringify(newPlan.value.exercises) 
         : null
@@ -3142,6 +3255,101 @@ onMounted(async () => {
   border: 1px solid rgba(102, 126, 234, 0.1);
   font-size: 0.9rem;
   color: #333;
+}
+
+/* Daily Distribution Styles */
+.daily-distribution {
+  margin-top: 24px;
+  margin-bottom: 24px;
+  padding: 20px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.03) 0%, rgba(118, 75, 162, 0.03) 100%);
+  border-radius: 12px;
+  border: 1px solid rgba(102, 126, 234, 0.1);
+}
+
+.daily-distribution h4 {
+  margin: 0 0 16px 0;
+  color: #667eea;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.distribution-container {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.distribution-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.distribution-container::-webkit-scrollbar-track {
+  background: rgba(102, 126, 234, 0.05);
+  border-radius: 3px;
+}
+
+.distribution-container::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.3);
+  border-radius: 3px;
+}
+
+.distribution-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.5);
+}
+
+.day-plan-card {
+  background: white;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  margin-bottom: 12px;
+}
+
+.day-plan-card:hover {
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+  transform: translateY(-2px);
+}
+
+.day-plan-header {
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+}
+
+.day-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workouts-list {
+  padding: 8px 0;
+}
+
+.workout-item {
+  padding: 8px 12px;
+  background: rgba(102, 126, 234, 0.03);
+  border-radius: 6px;
+  border-left: 3px solid #667eea;
+  transition: all 0.2s ease;
+  margin-bottom: 8px;
+}
+
+.workout-item:hover {
+  background: rgba(102, 126, 234, 0.08);
+  transform: translateX(4px);
+}
+
+.workout-name {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.workout-details {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 @media (max-width: 768px) {

@@ -1,6 +1,7 @@
 const db = require('../config/db');
+const { getUserStats, updateUserStats } = require('../utils/statsCalculator');
 
-// View stats: ongoing and completed workouts
+// View stats: ongoing and completed workouts (Web Admin - legacy endpoint)
 exports.view = async (req, res, next) => {
   try {
     const { user_id, from, to } = req.query;
@@ -49,6 +50,111 @@ exports.view = async (req, res, next) => {
 
     res.json({ success: true, data: { ongoing, completed } });
   } catch (err) { next(err); }
+};
+
+/**
+ * Get user stats for mobile app
+ * Calculated from daily_training_plans and daily_training_plan_items tables
+ * GET /api/stats/mobile?planType=web_assigned|manual|ai_generated&refresh=true
+ */
+exports.getMobileStats = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { refresh, planType } = req.query;
+    
+    // If refresh=true, recalculate stats from daily_training_plans and daily_training_plan_items
+    const shouldRefresh = refresh === 'true' || refresh === true;
+    
+    // IMPORTANT: Filter by planType to ensure manual and assigned plans don't interfere
+    // If planType is not provided, default to null (will return most recent stats for backward compatibility)
+    const normalizedPlanType = planType || null;
+    
+    console.log(`📊 getMobileStats - Request from user ${userId}:`, {
+      planType: normalizedPlanType,
+      refresh: shouldRefresh,
+      queryParams: { refresh, planType }
+    });
+    
+    if (normalizedPlanType) {
+      console.log(`📊 getMobileStats - Fetching stats for planType: ${normalizedPlanType}`);
+    } else {
+      console.log(`⚠️ getMobileStats - WARNING: No planType specified! This may return wrong stats. For AI plans, use planType=ai_generated`);
+    }
+    
+    const stats = await getUserStats(userId, shouldRefresh, normalizedPlanType);
+    
+    if (!stats) {
+      console.error(`❌ getMobileStats - No stats found for user ${userId} with planType: ${normalizedPlanType}`);
+      return res.status(404).json({
+        success: false,
+        message: 'Stats not found for this user'
+      });
+    }
+    
+    // Log stats summary for debugging
+    console.log(`✅ getMobileStats - Returning stats for user ${userId}:`, {
+      planType: normalizedPlanType,
+      daily_workouts_days: stats.daily_workouts ? Object.keys(stats.daily_workouts).length : 0,
+      recent_workouts_count: stats.recent_workouts ? stats.recent_workouts.length : 0,
+      weekly_total_workouts: stats.weekly_progress ? stats.weekly_progress.total_workouts : 0,
+      monthly_total_workouts: stats.monthly_progress ? stats.monthly_progress.total_workouts : 0
+    });
+    
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (err) {
+    console.error('Error getting mobile stats:', err);
+    next(err);
+  }
+};
+
+/**
+ * Sync/update user stats for mobile app
+ * Recalculates stats from daily_training_plans and daily_training_plan_items
+ * POST /api/stats/mobile/sync
+ * Body: { planType?: 'web_assigned'|'manual'|'ai_generated' }
+ * 
+ * IMPORTANT: If planType is provided, only syncs stats for that plan type
+ * If planType is not provided, syncs stats for ALL plan types (default behavior)
+ */
+exports.syncMobileStats = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { planType } = req.body || {};
+    
+    // IMPORTANT: updateUserStats always updates ALL plan types
+    // This ensures stats for web_assigned, manual, and ai_generated are all kept in sync
+    // The frontend should fetch stats with planType parameter to get the correct one
+    console.log(`📊 syncMobileStats - Syncing stats for user ${userId} (planType filter: ${planType || 'ALL'})`);
+    
+    // Recalculate and update stats from daily_training_plans and daily_training_plan_items
+    // This updates stats for ALL plan types (web_assigned, manual, ai_generated)
+    const stats = await updateUserStats(userId);
+    
+    // If planType is specified, return only that plan type's stats
+    if (planType) {
+      const { getUserStats } = require('../utils/statsCalculator');
+      const filteredStats = await getUserStats(userId, false, planType);
+      
+      res.json({
+        success: true,
+        message: `Stats synced successfully for planType: ${planType}`,
+        data: filteredStats
+      });
+    } else {
+      // Return all stats (backward compatibility)
+      res.json({
+        success: true,
+        message: 'Stats synced successfully for all plan types',
+        data: stats
+      });
+    }
+  } catch (err) {
+    console.error('Error syncing mobile stats:', err);
+    next(err);
+  }
 };
 
 

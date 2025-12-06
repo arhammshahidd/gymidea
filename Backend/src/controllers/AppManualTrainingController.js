@@ -431,8 +431,17 @@ exports.getPlan = async (req, res) => {
 exports.listPlans = async (req, res) => {
   try {
     const { user_id } = req.query;
-    const requestingUserId = req.user.id;
-    const requestingUserRole = req.user.role;
+    const requestingUserId = req.user?.id;
+    const requestingUserRole = req.user?.role;
+    const gymId = req.user?.gym_id;
+    
+    // Validate user authentication
+    if (!requestingUserId) {
+      console.error('❌ listPlans - No user_id found in req.user');
+      return res.status(401).json({ success: false, message: 'User not authenticated' });
+    }
+    
+    console.log(`📋 listPlans - Request from user ${requestingUserId}, role: ${requestingUserRole}, gym_id: ${gymId}`);
     
     let qb = db('app_manual_training_plans')
       .select('*')
@@ -442,28 +451,58 @@ exports.listPlans = async (req, res) => {
     if (requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer') {
       // Admin/trainer can see plans for specific users or all users in their gym
       if (user_id) {
-        qb = qb.where({ user_id: Number(user_id), gym_id: req.user.gym_id });
+        if (gymId) {
+          qb = qb.where({ user_id: Number(user_id), gym_id: gymId });
+        } else {
+          qb = qb.where({ user_id: Number(user_id) });
+        }
       } else {
-        qb = qb.where({ gym_id: req.user.gym_id });
+        if (gymId) {
+          qb = qb.where({ gym_id: gymId });
+        } else {
+          // If no gym_id, admin/trainer can see all plans (fallback)
+          console.warn('⚠️ listPlans - Admin/trainer has no gym_id, showing all plans');
+        }
       }
     } else {
       // Regular users can only see their own plans
-      qb = qb.where({ user_id: requestingUserId, gym_id: req.user.gym_id });
+      // gym_id can be null for standalone users, so don't filter by it if null
+      if (gymId) {
+        qb = qb.where({ user_id: requestingUserId, gym_id: gymId });
+      } else {
+        qb = qb.where({ user_id: requestingUserId });
+      }
     }
     
     // CRITICAL: Filter out assigned plans (mirrored from training_plan_assignments)
-    // Assigned plans have web_plan_id set to the assignment ID
-    // True manual plans don't have web_plan_id (or it's null)
+    // Assigned plans have web_plan_id set to the assignment ID (non-null integer)
+    // True manual plans don't have web_plan_id (it's null)
     // This ensures "Plans" tab only shows manual plans, not assigned plans
     // Assigned plans should only appear in "Schedules" tab via /api/trainingPlans/assignments/user/:user_id
-    qb = qb.where(function() {
-      this.whereNull('web_plan_id')
-        .orWhere('web_plan_id', '');
-    });
+    try {
+      // web_plan_id is an integer column, so we only need to check for NULL
+      // Assigned plans will have a non-null web_plan_id (the assignment ID)
+      qb = qb.whereNull('web_plan_id');
+      
+      console.log(`📋 listPlans - Filtering out assigned plans (plans with web_plan_id). Only returning true manual plans.`);
+    } catch (filterErr) {
+      console.error('❌ Error applying web_plan_id filter:', filterErr);
+      // Continue without the filter if it fails (shouldn't happen, but be safe)
+      console.warn('⚠️ Continuing without web_plan_id filter');
+    }
     
-    console.log(`📋 listPlans - Filtering out assigned plans (plans with web_plan_id). Only returning true manual plans.`);
-    
-    const plans = await qb;
+    let plans;
+    try {
+      plans = await qb;
+      console.log(`📋 listPlans - Found ${plans.length} manual plans`);
+    } catch (queryErr) {
+      console.error('❌ Error executing query:', {
+        error: queryErr.message,
+        stack: queryErr.stack,
+        sql: queryErr.sql
+      });
+      throw queryErr; // Re-throw to be caught by outer catch
+    }
     
     // Get all approval_ids for approved plans in a single query (more efficient)
     const planIds = plans.map(p => p.id);
@@ -531,8 +570,29 @@ exports.listPlans = async (req, res) => {
     
     return res.json({ success: true, data: plansWithApprovalId });
   } catch (err) {
-    console.error('Error listing app manual training plans:', err);
-    return res.status(500).json({ success: false, message: 'Failed to list manual training plans' });
+    // CRITICAL: Log detailed error information to help diagnose the 500 error
+    console.error('❌ CRITICAL ERROR in listPlans:', {
+      error_message: err.message,
+      error_stack: err.stack,
+      error_name: err.name,
+      error_code: err.code,
+      requesting_user_id: req.user?.id,
+      requesting_user_role: req.user?.role,
+      gym_id: req.user?.gym_id,
+      query_user_id: req.query?.user_id,
+      timestamp: new Date().toISOString()
+    });
+    
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Failed to list manual training plans',
+      error: err.message,
+      debug: process.env.NODE_ENV === 'development' ? {
+        stack: err.stack,
+        name: err.name,
+        code: err.code
+      } : undefined
+    });
   }
 };
 

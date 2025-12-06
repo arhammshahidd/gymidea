@@ -5,47 +5,76 @@ const bcrypt = require('bcrypt');
 exports.getUserStats = async (req, res) => {
   try {
     const gymId = req.user.gym_id;
+    const userRole = req.user.role;
+    const userId = req.user.id;
     
     console.log('=== GETTING USER STATS ===');
     console.log('Gym ID:', gymId);
+    console.log('User Role:', userRole);
+    console.log('User ID:', userId);
 
-    // Get total users
-    const totalUsers = await db('users')
-      .where({ gym_id: gymId })
-      .count('id as count')
-      .first();
+    // SECURITY: Regular users should only see their own stats, not all gym users
+    // Only gym_admin, trainer, and super_admin should see gym-wide stats
+    const isAdminOrTrainer = userRole === 'GYM_ADMIN' || userRole === 'TRAINER' || userRole === 'SUPER_ADMIN' || userRole === 'gym_admin' || userRole === 'trainer';
+    
+    let stats;
+    if (isAdminOrTrainer) {
+      // Admin/trainer can see gym-wide stats
+      // Get total users
+      const totalUsers = await db('users')
+        .where({ gym_id: gymId })
+        .count('id as count')
+        .first();
 
-    // Get active users
-    const activeUsers = await db('users')
-      .where({ gym_id: gymId, status: 'ACTIVE' })
-      .count('id as count')
-      .first();
+      // Get active users
+      const activeUsers = await db('users')
+        .where({ gym_id: gymId, status: 'ACTIVE' })
+        .count('id as count')
+        .first();
 
-    // Get inactive users
-    const inactiveUsers = await db('users')
-      .where({ gym_id: gymId, status: 'INACTIVE' })
-      .count('id as count')
-      .first();
+      // Get inactive users
+      const inactiveUsers = await db('users')
+        .where({ gym_id: gymId, status: 'INACTIVE' })
+        .count('id as count')
+        .first();
 
-    // Get basic membership users
-    const basicMembers = await db('users')
-      .where({ gym_id: gymId, membership_tier: 'BASIC' })
-      .count('id as count')
-      .first();
+      // Get basic membership users
+      const basicMembers = await db('users')
+        .where({ gym_id: gymId, membership_tier: 'BASIC' })
+        .count('id as count')
+        .first();
 
-    // Get premium membership users
-    const premiumMembers = await db('users')
-      .where({ gym_id: gymId, membership_tier: 'PREMIUM' })
-      .count('id as count')
-      .first();
+      // Get premium membership users
+      const premiumMembers = await db('users')
+        .where({ gym_id: gymId, membership_tier: 'PREMIUM' })
+        .count('id as count')
+        .first();
 
-    const stats = {
-      totalUsers: parseInt(totalUsers.count),
-      totalActiveUsers: parseInt(activeUsers.count),
-      totalInactiveUsers: parseInt(inactiveUsers.count),
-      totalBasicMemberships: parseInt(basicMembers.count),
-      totalPremiumMemberships: parseInt(premiumMembers.count)
-    };
+      stats = {
+        totalUsers: parseInt(totalUsers.count),
+        totalActiveUsers: parseInt(activeUsers.count),
+        totalInactiveUsers: parseInt(inactiveUsers.count),
+        totalBasicMemberships: parseInt(basicMembers.count),
+        totalPremiumMemberships: parseInt(premiumMembers.count)
+      };
+    } else {
+      // Regular users only see their own stats (count of 1 or 0)
+      const user = await db('users')
+        .where({ id: userId, gym_id: gymId })
+        .first();
+      
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'User not found' });
+      }
+      
+      stats = {
+        totalUsers: 1,
+        totalActiveUsers: user.status === 'ACTIVE' ? 1 : 0,
+        totalInactiveUsers: user.status === 'INACTIVE' ? 1 : 0,
+        totalBasicMemberships: user.membership_tier === 'BASIC' ? 1 : 0,
+        totalPremiumMemberships: user.membership_tier === 'PREMIUM' ? 1 : 0
+      };
+    }
 
     console.log('User stats:', stats);
     res.json({ success: true, data: stats });

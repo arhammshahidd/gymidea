@@ -25,6 +25,22 @@ const server = http.createServer(app);
 app.use(cors());
 app.use(express.json());
 
+// CRITICAL: Add global request logging to catch ALL requests before routing
+app.use((req, res, next) => {
+  // Only log POST requests to reduce noise, but log ALL POST requests
+  if (req.method === 'POST') {
+    console.log(`🌐 [GLOBAL] ${req.method} ${req.originalUrl || req.url} at ${new Date().toISOString()}`);
+    if (req.originalUrl && req.originalUrl.includes('complete')) {
+      console.log(`🔴 [GLOBAL] COMPLETION REQUEST DETECTED: ${req.method} ${req.originalUrl}`);
+      console.log(`🔴 [GLOBAL] Headers:`, {
+        authorization: req.headers.authorization ? 'present' : 'missing',
+        'content-type': req.headers['content-type']
+      });
+    }
+  }
+  next();
+});
+
 // Auto-load routes in src/routes (mounted under /api/<filename-without-.js>)
 const routesPath = path.join(__dirname, 'routes');
 if (fs.existsSync(routesPath)) {

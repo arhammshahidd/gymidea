@@ -1720,14 +1720,22 @@ const assignmentCategoryOptions = computed(() => {
   }))
 })
 
-// Get unique user levels from existing training plans
+// Get unique user levels from existing training plans - filtered by selected category
 const assignmentUserLevelOptions = computed(() => {
+  // If no category is selected, return empty array
+  if (!selectedCategory.value) {
+    return []
+  }
+  
+  // Filter plans by selected category and get unique user levels
   const userLevels = new Set()
   allTrainingPlans.value.forEach(plan => {
-    if (plan.user_level) {
+    // Only include user levels from plans that match the selected category
+    if (plan.category === selectedCategory.value && plan.user_level) {
       userLevels.add(plan.user_level)
     }
   })
+  
   return Array.from(userLevels).map(level => ({
     label: level,
     value: level
@@ -2516,6 +2524,11 @@ watch(approvalSearch, (newValue) => {
       ap.user_name?.toLowerCase().includes(newValue.toLowerCase())
     )
   }
+})
+
+// Reset user level when category changes
+watch(selectedCategory, () => {
+  selectedUserLevel.value = null
 })
 
 // Lifecycle

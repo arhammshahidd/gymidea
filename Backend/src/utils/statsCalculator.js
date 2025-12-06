@@ -125,9 +125,75 @@ async function calculateUserStats(userId, planType = null) {
       console.log(`📊 Stats - No planType filter specified, will get ALL completed plans for user ${userId}`);
     }
     
-    const completedPlans = await completedPlansQuery.orderBy('plan_date', 'desc');
+    let completedPlans = await completedPlansQuery.orderBy('plan_date', 'desc');
     
     console.log(`📊 Stats - Found ${completedPlans.length} completed plans for user ${userId}${planType ? ` (plan_type: ${planType})` : ' (all plan types)'}`);
+    
+    // CRITICAL: Filter out plans that are before assignment start_date
+    // This ensures plans like 2025-12-05 are excluded when assignment start_date is 2025-12-06
+    let assignmentStartDatesMap = {};
+    const plansWithSourceId = completedPlans.filter(p => p.source_plan_id && !p.is_stats_record);
+    if (plansWithSourceId.length > 0) {
+      try {
+        const sourceIds = [...new Set(plansWithSourceId.map(p => p.source_plan_id.toString()))];
+        const assignments = await db('training_plan_assignments')
+          .whereIn('id', sourceIds.map(id => parseInt(id) || 0).filter(id => id > 0))
+          .select('id', 'start_date');
+        
+        assignments.forEach(assignment => {
+          let startDateStr;
+          if (assignment.start_date instanceof Date) {
+            const d = assignment.start_date;
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            startDateStr = `${year}-${month}-${day}`;
+          } else if (typeof assignment.start_date === 'string') {
+            startDateStr = assignment.start_date.split('T')[0];
+          } else {
+            return; // Skip invalid dates
+          }
+          assignmentStartDatesMap[assignment.id.toString()] = startDateStr;
+          console.log(`📅 Assignment ${assignment.id} start_date: ${startDateStr}`);
+        });
+      } catch (assignmentErr) {
+        console.error('⚠️ Error fetching assignment start dates for stats filter:', assignmentErr);
+      }
+    }
+    
+    // Filter out plans before assignment start_date
+    const plansBeforeStartDate = completedPlans.filter(plan => {
+      if (!plan.source_plan_id) return false; // Only check plans with source_plan_id (assignments)
+      
+      const assignmentStartDate = assignmentStartDatesMap[plan.source_plan_id.toString()];
+      if (!assignmentStartDate) return false; // No assignment found, skip check
+      
+      // Normalize plan_date to YYYY-MM-DD format
+      let planDateStr;
+      if (plan.plan_date instanceof Date) {
+        const d = plan.plan_date;
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        planDateStr = `${year}-${month}-${day}`;
+      } else if (typeof plan.plan_date === 'string') {
+        planDateStr = plan.plan_date.split('T')[0];
+      } else {
+        return false; // Invalid date, skip
+      }
+      
+      if (planDateStr < assignmentStartDate) {
+        console.log(`⏭️ Skipping plan ${plan.id} (${planDateStr}) - before assignment start_date (${assignmentStartDate})`);
+        return true; // This plan should be filtered out
+      }
+      return false; // Keep this plan
+    });
+    
+    if (plansBeforeStartDate.length > 0) {
+      console.log(`📊 Stats - Filtering out ${plansBeforeStartDate.length} plan(s) that are before assignment start_date`);
+      const planIdsToFilter = new Set(plansBeforeStartDate.map(p => p.id));
+      completedPlans = completedPlans.filter(p => !planIdsToFilter.has(p.id));
+    }
     
     // Debug: Log sample of completed plans to verify they're being found
     if (completedPlans.length > 0) {
@@ -235,7 +301,40 @@ async function calculateUserStats(userId, planType = null) {
       }
     }
     
-    const allPlans = await allPlansQuery.orderBy('plan_date', 'asc');
+    let allPlans = await allPlansQuery.orderBy('plan_date', 'asc');
+    
+    // CRITICAL: Also filter allPlans by assignment start_date to ensure consistency
+    // This prevents plans before start_date from being counted in task calculations
+    if (Object.keys(assignmentStartDatesMap).length > 0) {
+      const allPlansBeforeStartDate = allPlans.filter(plan => {
+        if (!plan.source_plan_id) return false; // Only check plans with source_plan_id (assignments)
+        
+        const assignmentStartDate = assignmentStartDatesMap[plan.source_plan_id.toString()];
+        if (!assignmentStartDate) return false; // No assignment found, skip check
+        
+        // Normalize plan_date to YYYY-MM-DD format
+        let planDateStr;
+        if (plan.plan_date instanceof Date) {
+          const d = plan.plan_date;
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          planDateStr = `${year}-${month}-${day}`;
+        } else if (typeof plan.plan_date === 'string') {
+          planDateStr = plan.plan_date.split('T')[0];
+        } else {
+          return false; // Invalid date, skip
+        }
+        
+        return planDateStr < assignmentStartDate; // Filter out if before start_date
+      });
+      
+      if (allPlansBeforeStartDate.length > 0) {
+        console.log(`📊 Stats - Filtering out ${allPlansBeforeStartDate.length} total plan(s) (including incomplete) that are before assignment start_date`);
+        const allPlanIdsToFilter = new Set(allPlansBeforeStartDate.map(p => p.id));
+        allPlans = allPlans.filter(p => !allPlanIdsToFilter.has(p.id));
+      }
+    }
     
     console.log(`📊 Stats - Found ${allPlans.length} total plans (including incomplete) for user ${userId}`);
     console.log(`📊 Stats - Breakdown: ${finalCompletedPlans.length} completed, ${allPlans.length - finalCompletedPlans.length} incomplete`);
@@ -1394,20 +1493,31 @@ async function updateUserStats(userId) {
               updatedStats.push(parseStatsRecord(newRecord));
             }
           } catch (insertError) {
-            // Handle duplicate key error - if constraint is on user_id alone, update existing record
-            if (insertError.code === '23505' && insertError.constraint === 'daily_training_plans_stats_unique') {
+            // Handle duplicate key error - if constraint is on user_id + plan_type, try to find and update
+            // If constraint is on user_id alone, we need to handle it differently
+            if (insertError.code === '23505') {
               console.warn(`⚠️ updateUserStats - Duplicate key error for ${planType}. Attempting to update existing record instead.`);
               
-              // Try to find and update the existing stats record
-              // The constraint might be on user_id alone, so find any stats record for this user
-              const existingStats = await db('daily_training_plans')
-                .where({ user_id: userId, is_stats_record: true })
+              // Try to find the existing stats record with the same plan_type first
+              let existingStats = await db('daily_training_plans')
+                .where({ user_id: userId, is_stats_record: true, plan_type: planType })
                 .first();
+              
+              // If not found, check if constraint is on user_id alone (only one stats record per user)
+              if (!existingStats) {
+                existingStats = await db('daily_training_plans')
+                  .where({ user_id: userId, is_stats_record: true })
+                  .first();
+                
+                if (existingStats && existingStats.plan_type !== planType) {
+                  console.warn(`⚠️ updateUserStats - Found stats record with different plan_type '${existingStats.plan_type}' for user ${userId}. This suggests constraint is on user_id alone. Updating to '${planType}'.`);
+                }
+              }
               
               if (existingStats) {
                 // Update the existing record with the new plan_type and stats
                 const updateData = {
-                  plan_type: planType,
+                  plan_type: planType, // Always set to the correct plan_type
                   stats_date_updated: stats.date_updated,
                   stats_daily_workouts: dailyWorkoutsJson,
                   stats_total_workouts: stats.total_workouts,

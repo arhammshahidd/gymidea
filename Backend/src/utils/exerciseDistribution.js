@@ -217,10 +217,36 @@ function createDistributedPlan(planData, startDate, endDate) {
   const dailyPlans = distributeExercises(exercises, totalDays, workoutsPerDay);
   
   // Set dates for each day
+  // CRITICAL: Use LOCAL date components to avoid timezone shifts
+  // When dates are Date objects with timezone, toISOString() converts to UTC
+  // which can shift the date by one day (e.g., Dec 02 GMT+0500 becomes Dec 01 UTC)
   dailyPlans.forEach((dayPlan, index) => {
-    const dayDate = new Date(startDate);
-    dayDate.setDate(startDate.getDate() + index);
-    dayPlan.date = dayDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+    // Parse startDate to get local components
+    let startDateLocal;
+    if (startDate instanceof Date) {
+      startDateLocal = new Date(startDate);
+    } else if (typeof startDate === 'string') {
+      // If it's a string, parse it
+      if (startDate.includes('T')) {
+        startDateLocal = new Date(startDate);
+      } else {
+        // YYYY-MM-DD format
+        const [year, month, day] = startDate.split('-').map(Number);
+        startDateLocal = new Date(year, month - 1, day, 0, 0, 0, 0);
+      }
+    } else {
+      startDateLocal = new Date(startDate);
+    }
+    
+    // Add index days using local date components
+    const dayDate = new Date(startDateLocal);
+    dayDate.setDate(startDateLocal.getDate() + index);
+    
+    // Format using LOCAL date components (not UTC)
+    const year = dayDate.getFullYear();
+    const month = String(dayDate.getMonth() + 1).padStart(2, '0');
+    const day = String(dayDate.getDate()).padStart(2, '0');
+    dayPlan.date = `${year}-${month}-${day}`; // YYYY-MM-DD format
   });
 
   return {

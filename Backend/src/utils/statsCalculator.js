@@ -100,8 +100,15 @@ async function calculateUserStats(userId, planType = null) {
     // Get all completed daily training plans for the user
     // IMPORTANT: Exclude stats records and ONLY include plans that are actually completed
     // This ensures incomplete plans (like day 2 in progress) are NOT included in stats
+    // CRITICAL: Handle both boolean true and string 't' for is_completed (PostgreSQL can return either)
     let completedPlansQuery = db('daily_training_plans')
-      .where({ user_id: userId, is_completed: true, is_stats_record: false })
+      .where(function() {
+        // Handle both boolean true and string 't' for is_completed
+        this.where('is_completed', true)
+            .orWhere('is_completed', 't')
+            .orWhere('is_completed', 1);
+      })
+      .where({ user_id: userId, is_stats_record: false })
       .whereNotNull('completed_at'); // Additional safeguard: must have completed_at timestamp
     
     // Filter by plan_type if specified
@@ -109,7 +116,7 @@ async function calculateUserStats(userId, planType = null) {
       // Handle web_assigned to include both web_assigned and web_assigne (typo variant)
       if (planType === 'web_assigned') {
         completedPlansQuery = completedPlansQuery.whereIn('plan_type', ['web_assigned', 'web_assigne']);
-        console.log(`📊 Stats - Filtering by plan_type: web_assigned (including web_assigne variant)`);
+        console.log(`📊 Stats - Filtering by plan_type: web_assigned (including web_assigne variant) for user ${userId}`);
       } else {
         completedPlansQuery = completedPlansQuery.where({ plan_type: planType });
         console.log(`📊 Stats - Filtering by plan_type: ${planType} for user ${userId}`);
@@ -121,6 +128,36 @@ async function calculateUserStats(userId, planType = null) {
     const completedPlans = await completedPlansQuery.orderBy('plan_date', 'desc');
     
     console.log(`📊 Stats - Found ${completedPlans.length} completed plans for user ${userId}${planType ? ` (plan_type: ${planType})` : ' (all plan types)'}`);
+    
+    // Debug: Log sample of completed plans to verify they're being found
+    if (completedPlans.length > 0) {
+      console.log(`📊 Stats - Sample completed plans (first 3):`, completedPlans.slice(0, 3).map(p => ({
+        id: p.id,
+        plan_date: p.plan_date,
+        plan_type: p.plan_type,
+        source_plan_id: p.source_plan_id,
+        is_completed: p.is_completed,
+        completed_at: p.completed_at ? 'has_value' : 'null'
+      })));
+    } else {
+      console.warn(`⚠️ Stats - WARNING: No completed plans found! This might indicate a data issue.`);
+      // Debug: Check if there are any plans at all for this user/planType
+      let debugQuery = db('daily_training_plans')
+        .where({ user_id: userId, is_stats_record: false });
+      if (planType === 'web_assigned') {
+        debugQuery = debugQuery.whereIn('plan_type', ['web_assigned', 'web_assigne']);
+      } else if (planType) {
+        debugQuery = debugQuery.where({ plan_type: planType });
+      }
+      const allPlansDebug = await debugQuery.select('id', 'plan_date', 'plan_type', 'is_completed', 'completed_at').limit(10);
+      console.log(`📊 Stats - Debug: Found ${allPlansDebug.length} total plans (completed or not):`, allPlansDebug.map(p => ({
+        id: p.id,
+        plan_date: p.plan_date,
+        plan_type: p.plan_type,
+        is_completed: p.is_completed,
+        completed_at: p.completed_at ? 'has_value' : 'null'
+      })));
+    }
     
     // Enhanced logging for AI plans specifically
     if (planType === 'ai_generated' || !planType) {
@@ -137,13 +174,18 @@ async function calculateUserStats(userId, planType = null) {
     
     // Additional validation: Filter out any plans that don't have is_completed = true
     // This is a double-check to prevent incomplete plans from being included
+    // CRITICAL: Handle both boolean true and string 't' for is_completed (PostgreSQL can return either)
     const validatedCompletedPlans = completedPlans.filter(plan => {
-      if (!plan.is_completed) {
-        console.warn(`⚠️ Stats - WARNING: Plan ${plan.id} (plan_date: ${plan.plan_date}) has is_completed=false but was returned by query! Filtering out.`);
+      // Check if plan is actually completed (handle boolean true, string 't', or number 1)
+      const isCompleted = plan.is_completed === true || plan.is_completed === 't' || plan.is_completed === 1;
+      const hasCompletedAt = plan.completed_at != null && plan.completed_at !== 'null';
+      
+      if (!isCompleted) {
+        console.warn(`⚠️ Stats - WARNING: Plan ${plan.id} (plan_date: ${plan.plan_date}) has is_completed=${plan.is_completed} (type: ${typeof plan.is_completed}) but was returned by query! Filtering out.`);
         return false;
       }
-      if (!plan.completed_at) {
-        console.warn(`⚠️ Stats - WARNING: Plan ${plan.id} (plan_date: ${plan.plan_date}) has is_completed=true but no completed_at timestamp! Filtering out.`);
+      if (!hasCompletedAt) {
+        console.warn(`⚠️ Stats - WARNING: Plan ${plan.id} (plan_date: ${plan.plan_date}) has is_completed=${plan.is_completed} but no completed_at timestamp! Filtering out.`);
         return false;
       }
       return true;
@@ -263,10 +305,8 @@ async function calculateUserStats(userId, planType = null) {
     // Frontend can get count using array.length
     
     // Get today's date for use in calculations (used in remaining tasks, today's plans, etc.)
-    const today = getTodayDate();
-    const todayDateObj = new Date(today + 'T00:00:00.000Z');
-    todayDateObj.setHours(0, 0, 0, 0);
-    const todayDateStr = todayDateObj.toISOString().split('T')[0];
+    // Use getTodayDate() which already returns local date in YYYY-MM-DD format
+    const todayDateStr = getTodayDate();
     
     console.log(`📊 Stats - Today's date: ${todayDateStr}`);
     
@@ -292,14 +332,24 @@ async function calculateUserStats(userId, planType = null) {
       }
       
       // Normalize date to YYYY-MM-DD format for consistent keys
+      // CRITICAL: Use LOCAL date components to avoid timezone shifts
+      // When dates are Date objects with timezone, toISOString() converts to UTC
+      // which can shift the date by one day (e.g., Dec 02 GMT+0500 becomes Dec 01 UTC)
       let normalizedDate;
       if (dateToUse instanceof Date) {
-        normalizedDate = dateToUse.toISOString().split('T')[0];
+        // Use LOCAL date components, not UTC
+        const d = dateToUse;
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        normalizedDate = `${year}-${month}-${day}`;
       } else if (typeof dateToUse === 'string') {
         if (dateToUse.includes('T')) {
-          normalizedDate = new Date(dateToUse).toISOString().split('T')[0];
+          // If it has time component, extract just the date part
+          normalizedDate = dateToUse.split('T')[0];
         } else {
-          normalizedDate = dateToUse.split('T')[0]; // Already YYYY-MM-DD
+          // Already YYYY-MM-DD format
+          normalizedDate = dateToUse.split('T')[0];
         }
       } else {
         console.log(`  ⏭️ Skipping plan ${plan.id}: invalid plan_date type: ${typeof dateToUse}`);
@@ -406,23 +456,25 @@ async function calculateUserStats(userId, planType = null) {
     
     // Calculate longest streak
     // Parse dates properly to handle ISO format
+    // CRITICAL: Use LOCAL date components to avoid timezone shifts
     const completedDates = finalCompletedPlans
       .map(plan => {
         if (!plan.plan_date) return null;
-        let planDate;
+        let normalizedDate;
         if (plan.plan_date instanceof Date) {
-          planDate = new Date(plan.plan_date);
+          // Use LOCAL date components, not UTC
+          const d = plan.plan_date;
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          normalizedDate = `${year}-${month}-${day}`;
         } else if (typeof plan.plan_date === 'string') {
-          if (plan.plan_date.includes('T')) {
-            planDate = new Date(plan.plan_date);
-          } else {
-            planDate = new Date(plan.plan_date + 'T00:00:00.000Z');
-          }
+          // Extract date part from string
+          normalizedDate = plan.plan_date.split('T')[0];
         } else {
           return null;
         }
-        planDate.setHours(0, 0, 0, 0);
-        return planDate.toISOString().split('T')[0]; // Return YYYY-MM-DD format
+        return normalizedDate; // Return YYYY-MM-DD format
       })
       .filter(date => date !== null);
     
@@ -497,8 +549,12 @@ async function calculateUserStats(userId, planType = null) {
           }
           
           if (completedDate) {
-            completedDate.setHours(0, 0, 0, 0);
-            const completedDateStr = completedDate.toISOString().split('T')[0];
+            // CRITICAL: Use LOCAL date components to avoid timezone shifts
+            const d = completedDate;
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const completedDateStr = `${year}-${month}-${day}`;
             
             // For completed plans, use completed_at date for accurate week/month grouping
             // This ensures plans completed this week are counted in this week's stats
@@ -532,9 +588,23 @@ async function calculateUserStats(userId, planType = null) {
         return false;
       }
       
+      // CRITICAL: Use LOCAL date components to avoid timezone shifts
+      let planDateStr;
+      if (dateToUse instanceof Date) {
+        const d = dateToUse;
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        planDateStr = `${year}-${month}-${day}`;
+      } else if (typeof dateToUse === 'string') {
+        planDateStr = dateToUse.split('T')[0];
+      } else {
+        planDateStr = '';
+      }
+      
+      // Create Date object for comparison (using UTC to avoid timezone issues in comparison)
       planDate.setHours(0, 0, 0, 0);
       const normalizedPlanDate = new Date(planDate);
-      const planDateStr = normalizedPlanDate.toISOString().split('T')[0];
       
       // Check if plan date is within the week range
       const isInWeek = normalizedPlanDate >= weekDates.start && normalizedPlanDate <= weekDates.end;
@@ -647,13 +717,33 @@ async function calculateUserStats(userId, planType = null) {
       if (plan.is_completed && plan.completed_at) {
         try {
           const completedDate = new Date(plan.completed_at);
-          completedDate.setHours(0, 0, 0, 0);
-          return completedDate.toISOString().split('T')[0];
+          // CRITICAL: Use LOCAL date components to avoid timezone shifts
+          const d = completedDate;
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
         } catch (e) {
-          return plan.plan_date;
+          // If parsing fails, try to extract from plan_date
+          if (plan.plan_date instanceof Date) {
+            const d = plan.plan_date;
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          }
+          return typeof plan.plan_date === 'string' ? plan.plan_date.split('T')[0] : null;
         }
       }
-      return dateToUse;
+      // Normalize plan_date
+      if (dateToUse instanceof Date) {
+        const d = dateToUse;
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      return typeof dateToUse === 'string' ? dateToUse.split('T')[0] : null;
     }).filter(Boolean);
     
     const uniqueCompletedDays = [...new Set(weeklyCompletedDates)].length;
@@ -741,8 +831,12 @@ async function calculateUserStats(userId, planType = null) {
           }
           
           if (completedDate) {
-            completedDate.setHours(0, 0, 0, 0);
-            const completedDateStr = completedDate.toISOString().split('T')[0];
+            // CRITICAL: Use LOCAL date components to avoid timezone shifts
+            const d = completedDate;
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const completedDateStr = `${year}-${month}-${day}`;
             
             // For completed plans, use completed_at date for accurate month grouping
             // This ensures plans completed this month are counted in this month's stats
@@ -761,21 +855,32 @@ async function calculateUserStats(userId, planType = null) {
       }
       
       // Handle date - it might be a Date object or string
-      let planDate;
+      // CRITICAL: Use LOCAL date components to avoid timezone shifts
+      let planDateStr;
       if (dateToUse instanceof Date) {
-        planDate = new Date(dateToUse);
+        const d = dateToUse;
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        planDateStr = `${year}-${month}-${day}`;
       } else if (typeof dateToUse === 'string') {
-        // Parse date string (handle both YYYY-MM-DD and ISO format)
-        if (dateToUse.includes('T')) {
-          planDate = new Date(dateToUse);
-        } else {
-          planDate = new Date(dateToUse + 'T00:00:00.000Z');
-        }
+        planDateStr = dateToUse.split('T')[0];
       } else {
         console.log(`  ⏭️ Skipping plan ${plan.id}: invalid date type: ${typeof dateToUse}`);
         return false;
       }
       
+      // Create Date object for comparison (using UTC to avoid timezone issues in comparison)
+      let planDate;
+      if (dateToUse instanceof Date) {
+        planDate = new Date(dateToUse);
+      } else if (typeof dateToUse === 'string') {
+        if (dateToUse.includes('T')) {
+          planDate = new Date(dateToUse);
+        } else {
+          planDate = new Date(dateToUse + 'T00:00:00.000Z');
+        }
+      }
       planDate.setHours(0, 0, 0, 0);
       const normalizedPlanDate = new Date(planDate);
       
@@ -783,9 +888,9 @@ async function calculateUserStats(userId, planType = null) {
       const isInMonth = normalizedPlanDate >= monthDates.start && normalizedPlanDate <= monthDates.end;
       
       if (isInMonth) {
-        console.log(`  ✅ Plan ${plan.id}: date=${dateToUse} (normalized: ${normalizedPlanDate.toISOString().split('T')[0]}, is_completed=${plan.is_completed}) is in month range`);
+        console.log(`  ✅ Plan ${plan.id}: date=${dateToUse} (normalized: ${planDateStr}, is_completed=${plan.is_completed}) is in month range`);
       } else {
-        console.log(`  ⏭️ Plan ${plan.id}: date=${dateToUse} (normalized: ${normalizedPlanDate.toISOString().split('T')[0]}) is OUTSIDE month range`);
+        console.log(`  ⏭️ Plan ${plan.id}: date=${dateToUse} (normalized: ${planDateStr}) is OUTSIDE month range`);
       }
       
       return isInMonth;
@@ -867,13 +972,33 @@ async function calculateUserStats(userId, planType = null) {
         if (plan.is_completed && plan.completed_at) {
           try {
             const completedDate = new Date(plan.completed_at);
-            completedDate.setHours(0, 0, 0, 0);
-            return completedDate.toISOString().split('T')[0];
+            // CRITICAL: Use LOCAL date components to avoid timezone shifts
+            const d = completedDate;
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
           } catch (e) {
-            return plan.plan_date;
+            // If parsing fails, try to extract from plan_date
+            if (plan.plan_date instanceof Date) {
+              const d = plan.plan_date;
+              const year = d.getFullYear();
+              const month = String(d.getMonth() + 1).padStart(2, '0');
+              const day = String(d.getDate()).padStart(2, '0');
+              return `${year}-${month}-${day}`;
+            }
+            return typeof plan.plan_date === 'string' ? plan.plan_date.split('T')[0] : null;
           }
         }
-        return dateToUse;
+        // Normalize plan_date
+        if (dateToUse instanceof Date) {
+          const d = dateToUse;
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
+        return typeof dateToUse === 'string' ? dateToUse.split('T')[0] : null;
       })
       .filter(Boolean);
     
@@ -1257,16 +1382,64 @@ async function updateUserStats(userId) {
           };
           
           console.log(`📊 updateUserStats - Creating new stats record for ${planType}...`);
-          const [newRecord] = await db('daily_training_plans')
-            .insert(insertData)
-        .returning('*');
-      
-          if (!newRecord) {
-            console.error(`❌ updateUserStats - ERROR: Insert query did not return a record for ${planType}!`);
-          } else {
-            console.log(`✅ updateUserStats - Successfully created new stats record for ${planType} with ID: ${newRecord.id}`);
-            updatedStats.push(parseStatsRecord(newRecord));
-    }
+          try {
+            const [newRecord] = await db('daily_training_plans')
+              .insert(insertData)
+              .returning('*');
+        
+            if (!newRecord) {
+              console.error(`❌ updateUserStats - ERROR: Insert query did not return a record for ${planType}!`);
+            } else {
+              console.log(`✅ updateUserStats - Successfully created new stats record for ${planType} with ID: ${newRecord.id}`);
+              updatedStats.push(parseStatsRecord(newRecord));
+            }
+          } catch (insertError) {
+            // Handle duplicate key error - if constraint is on user_id alone, update existing record
+            if (insertError.code === '23505' && insertError.constraint === 'daily_training_plans_stats_unique') {
+              console.warn(`⚠️ updateUserStats - Duplicate key error for ${planType}. Attempting to update existing record instead.`);
+              
+              // Try to find and update the existing stats record
+              // The constraint might be on user_id alone, so find any stats record for this user
+              const existingStats = await db('daily_training_plans')
+                .where({ user_id: userId, is_stats_record: true })
+                .first();
+              
+              if (existingStats) {
+                // Update the existing record with the new plan_type and stats
+                const updateData = {
+                  plan_type: planType,
+                  stats_date_updated: stats.date_updated,
+                  stats_daily_workouts: dailyWorkoutsJson,
+                  stats_total_workouts: stats.total_workouts,
+                  stats_total_minutes: stats.total_minutes,
+                  stats_longest_streak: stats.longest_streak,
+                  stats_recent_workouts: recentWorkoutsJson,
+                  stats_weekly_progress: weeklyProgressJson,
+                  stats_monthly_progress: monthlyProgressJson,
+                  stats_items: itemsJson,
+                  updated_at: new Date()
+                };
+                
+                await db('daily_training_plans')
+                  .where({ id: existingStats.id })
+                  .update(updateData);
+                
+                const updated = await db('daily_training_plans')
+                  .where({ id: existingStats.id })
+                  .first();
+                
+                if (updated) {
+                  console.log(`✅ updateUserStats - Updated existing stats record (ID: ${existingStats.id}) for ${planType}`);
+                  updatedStats.push(parseStatsRecord(updated));
+                }
+              } else {
+                console.error(`❌ updateUserStats - Duplicate key error but no existing stats record found for user ${userId}`);
+              }
+            } else {
+              // Re-throw if it's not a duplicate key error
+              throw insertError;
+            }
+          }
         }
       } catch (planTypeError) {
         console.error(`❌ updateUserStats - Error processing plan_type ${planType}:`, planTypeError);
@@ -1322,6 +1495,7 @@ function parseStatsRecord(record) {
 async function getUserStats(userId, refresh = false, planType = null) {
   try {
     if (refresh) {
+      console.log(`📊 getUserStats - Refresh requested for user ${userId}, planType: ${planType || 'ALL'}`);
       return await updateUserStats(userId);
     }
     
@@ -1332,6 +1506,9 @@ async function getUserStats(userId, refresh = false, planType = null) {
     // Filter by plan_type if specified
     if (planType) {
       statsQuery = statsQuery.where({ plan_type: planType });
+      console.log(`📊 getUserStats - Querying stats record for user ${userId}, planType: ${planType}`);
+    } else {
+      console.log(`📊 getUserStats - Querying stats records for user ${userId} (no planType filter)`);
     }
     
     // If no planType specified, get all stats records (for backward compatibility, return first one)
@@ -1339,9 +1516,12 @@ async function getUserStats(userId, refresh = false, planType = null) {
       ? await statsQuery 
       : await statsQuery.orderBy('stats_date_updated', 'desc');
     
+    console.log(`📊 getUserStats - Found ${records.length} stats record(s) for user ${userId}, planType: ${planType || 'ALL'}`);
+    
     if (planType) {
       const record = records[0] || null;
       if (!record) {
+        console.log(`📊 getUserStats - No stats record found for planType ${planType}, creating new one...`);
         // Create stats if they don't exist for this plan type
         await updateUserStats(userId);
         // After updating, fetch the specific plan type's stats
@@ -1350,17 +1530,28 @@ async function getUserStats(userId, refresh = false, planType = null) {
           .first();
         if (!newRecord) {
           console.error(`❌ getUserStats - No stats record found for planType ${planType} even after updateUserStats`);
+          
+          // Debug: Check what stats records exist
+          const allStatsRecords = await db('daily_training_plans')
+            .where({ user_id: userId, is_stats_record: true })
+            .select('id', 'plan_type', 'stats_date_updated', 'stats_total_workouts');
+          console.log(`📊 getUserStats - Available stats records:`, allStatsRecords);
+          
           return null;
         }
+        console.log(`✅ getUserStats - Successfully created and retrieved stats record for planType ${planType}`);
         return parseStatsRecord(newRecord);
       }
+      console.log(`✅ getUserStats - Found existing stats record for planType ${planType}, total_workouts: ${record.stats_total_workouts || 0}`);
       return parseStatsRecord(record);
     } else {
       // Return all stats records if no planType specified
       if (records.length === 0) {
+        console.log(`📊 getUserStats - No stats records found, creating new ones...`);
         // Create stats if they don't exist
         return await updateUserStats(userId);
       }
+      console.log(`✅ getUserStats - Returning most recent stats record (plan_type: ${records[0].plan_type}, total_workouts: ${records[0].stats_total_workouts || 0})`);
       // Return the most recently updated one for backward compatibility
       return parseStatsRecord(records[0]);
     }

@@ -451,6 +451,18 @@ exports.listPlans = async (req, res) => {
       qb = qb.where({ user_id: requestingUserId, gym_id: req.user.gym_id });
     }
     
+    // CRITICAL: Filter out assigned plans (mirrored from training_plan_assignments)
+    // Assigned plans have web_plan_id set to the assignment ID
+    // True manual plans don't have web_plan_id (or it's null)
+    // This ensures "Plans" tab only shows manual plans, not assigned plans
+    // Assigned plans should only appear in "Schedules" tab via /api/trainingPlans/assignments/user/:user_id
+    qb = qb.where(function() {
+      this.whereNull('web_plan_id')
+        .orWhere('web_plan_id', '');
+    });
+    
+    console.log(`📋 listPlans - Filtering out assigned plans (plans with web_plan_id). Only returning true manual plans.`);
+    
     const plans = await qb;
     
     // Get all approval_ids for approved plans in a single query (more efficient)

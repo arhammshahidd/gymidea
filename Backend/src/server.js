@@ -1,12 +1,22 @@
-require('dotenv').config();
+// Load environment variables from Backend directory
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
-const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
 const { verifyToken, checkTokenVersion } = require('./utils/jwt');
 const db = require('./config/db');
+
+// Verify critical environment variables on startup
+if (!process.env.JWT_SECRET) {
+  console.error('❌ ERROR: JWT_SECRET is not defined in environment variables!');
+  console.error('Please ensure .env file exists in the Backend directory with JWT_SECRET set.');
+  process.exit(1);
+} else {
+  console.log('✅ JWT_SECRET loaded successfully');
+}
 
 const errorHandler = require('./middleware/errorhandler');
 

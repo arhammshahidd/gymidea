@@ -39,6 +39,7 @@ function parseWeightRange(weightValue) {
     weight_max_kg: null 
   };
 }
+
 const { createDistributedPlan } = require('../utils/exerciseDistribution');
 const { getUserProgressForPlan, smartUpdateMobilePlanItems } = require('../utils/smartPlanUpdates');
 
@@ -603,6 +604,16 @@ exports.update = async (req, res, next) => {
     const { id } = req.params;
     const updateData = { ...req.body };
     delete updateData.gym_id;
+    const itemsPayload = Array.isArray(updateData.items) ? [...updateData.items] : null;
+    delete updateData.items;
+
+    const existingPlan = await db('training_plans')
+      .where({ id, gym_id: req.user.gym_id })
+      .first();
+
+    if (!existingPlan) {
+      return res.status(404).json({ success: false, message: 'Plan not found' });
+    }
     
     // Ensure trainer_id is set from authenticated user
     if (!updateData.trainer_id && req.user.id) {
@@ -622,6 +633,147 @@ exports.update = async (req, res, next) => {
     // Keep weight_kg as text to support ranges like "20-40"
     // if (updateData.weight_kg) updateData.weight_kg = parseInt(updateData.weight_kg);
     if (updateData.assign_to) updateData.assign_to = parseInt(updateData.assign_to);
+
+    const resolvedCategory = updateData.exercise_plan_category || updateData.category || existingPlan.category;
+    let normalizedItems = null;
+
+    if (Array.isArray(itemsPayload)) {
+      const filteredItems = itemsPayload.filter((it) => {
+        if (!it || typeof it !== 'object') return false;
+        const hasData = it.name || it.workout_name || it.sets || it.reps || it.weight_kg || it.weight || it.minutes || it.training_minutes;
+        return !!hasData;
+      });
+
+      if (filteredItems.length) {
+        normalizedItems = filteredItems.map((it) => {
+          const workoutName = it.workout_name || it.name || 'Exercise';
+          const weightValue = it.weight_kg || it.weight || 0;
+          const minutesValue = it.minutes || it.training_minutes || 0;
+          let weightNumeric = 0;
+          if (typeof weightValue === 'string') {
+            if (weightValue.includes('-')) {
+              weightNumeric = parseFloat(weightValue.split('-')[0].trim()) || 0;
+            } else {
+              weightNumeric = parseFloat(weightValue) || 0;
+            }
+          } else if (typeof weightValue === 'number') {
+            weightNumeric = weightValue;
+          }
+
+          const row = {
+            name: workoutName,
+            workout_name: workoutName,
+            exercise_plan_category: it.exercise_plan_category ?? resolvedCategory ?? null,
+            sets: Number(it.sets || 0),
+            reps: Number(it.reps || 0),
+            weight: weightNumeric,
+            weight_kg: weightValue,
+            training_minutes: Number(minutesValue) || 0,
+            minutes: Number(minutesValue) || 0,
+          };
+
+          if (it.exercise_types !== undefined && it.exercise_types !== null && it.exercise_types !== '') {
+            row.exercise_types = Number(it.exercise_types) || 0;
+          }
+
+          return row;
+        });
+      }
+    }
+
+    if (!normalizedItems && updateData.exercises_details) {
+      try {
+        const parsed = typeof updateData.exercises_details === 'string'
+          ? JSON.parse(updateData.exercises_details)
+          : updateData.exercises_details;
+        if (Array.isArray(parsed) && parsed.length) {
+          normalizedItems = parsed.map((item) => {
+            if (!item || typeof item !== 'object') return null;
+            const workoutName = item.workout_name || item.name || 'Exercise';
+            const weightValue = item.weight_kg ?? item.weight ?? 0;
+            const minutesValue = item.minutes ?? item.training_minutes ?? 0;
+            return {
+              ...item,
+              name: workoutName,
+              workout_name: workoutName,
+              sets: Number(item.sets || 0),
+              reps: Number(item.reps || 0),
+              weight_kg: weightValue,
+              training_minutes: Number(minutesValue) || 0,
+              minutes: Number(minutesValue) || 0,
+              exercise_types: item.exercise_types ?? item.exercise_type ?? undefined,
+            };
+          }).filter(Boolean);
+        }
+      } catch (parseErr) {
+        console.error('Error parsing exercises_details during update:', parseErr);
+      }
+    }
+
+    if (normalizedItems && normalizedItems.length) {
+      try {
+        const startDateValue = updateData.start_date || existingPlan.start_date;
+        const endDateValue = updateData.end_date || existingPlan.end_date;
+        const startDate = startDateValue ? new Date(startDateValue) : null;
+        const endDate = endDateValue ? new Date(endDateValue) : null;
+
+        if (startDate && endDate && !isNaN(startDate.getTime()) && !isNaN(endDate.getTime()) && endDate >= startDate) {
+          const distributedPlan = createDistributedPlan({ items: normalizedItems }, startDate, endDate);
+          if (distributedPlan?.daily_plans && Array.isArray(distributedPlan.daily_plans) && distributedPlan.daily_plans.length) {
+            try {
+              updateData.daily_plans = JSON.stringify(distributedPlan.daily_plans);
+              console.log(`✅ Regenerated ${distributedPlan.daily_plans.length} daily plans for plan ${id}`);
+            } catch (jsonErr) {
+              console.error('Error stringifying regenerated daily_plans:', jsonErr);
+            }
+          }
+
+          if (updateData.total_workouts === undefined) {
+            updateData.total_workouts = distributedPlan?.total_exercises ?? normalizedItems.length ?? 0;
+          }
+          if (updateData.total_exercises === undefined) {
+            updateData.total_exercises = distributedPlan?.total_exercises ?? normalizedItems.length ?? 0;
+          }
+          if (updateData.training_minutes === undefined) {
+            updateData.training_minutes = distributedPlan?.total_training_minutes
+              ?? normalizedItems.reduce((sum, item) => sum + (Number(item.training_minutes || item.minutes || 0) || 0), 0);
+          }
+          if (updateData.sets === undefined) {
+            updateData.sets = normalizedItems.reduce((sum, item) => sum + (Number(item.sets) || 0), 0);
+          }
+          if (updateData.reps === undefined) {
+            updateData.reps = normalizedItems.reduce((sum, item) => sum + (Number(item.reps) || 0), 0);
+          }
+          if (updateData.weight_kg === undefined) {
+            const weightSum = normalizedItems.reduce((sum, item) => {
+              const w = item.weight_kg || item.weight || 0;
+              if (typeof w === 'string' && w.includes('-')) {
+                const num = parseFloat(w.split('-')[0]) || 0;
+                return sum + num;
+              }
+              return sum + (Number(w) || 0);
+            }, 0);
+            updateData.weight_kg = weightSum > 0 ? String(weightSum) : existingPlan.weight_kg || '0';
+          }
+        }
+
+        if (updateData.exercises_details === undefined || typeof updateData.exercises_details !== 'string') {
+          try {
+            updateData.exercises_details = JSON.stringify(normalizedItems);
+          } catch (stringifyErr) {
+            console.error('Error stringifying normalized items during update:', stringifyErr);
+          }
+        }
+      } catch (distErr) {
+        console.error('Error regenerating daily_plans during update:', distErr);
+      }
+    } else if (updateData.exercises_details && typeof updateData.exercises_details !== 'string') {
+      try {
+        updateData.exercises_details = JSON.stringify(updateData.exercises_details);
+      } catch (stringifyErr) {
+        console.error('Error stringifying exercises_details during update:', stringifyErr);
+      }
+    }
     
     console.log('Updating plan with data:', updateData);
     console.log('Exercises details being updated:', updateData.exercises_details);
@@ -678,7 +830,40 @@ exports.remove = async (req, res, next) => {
     const plan = await db('training_plans').where({ id, gym_id: req.user.gym_id }).first();
     if (!plan) return res.status(404).json({ success: false, message: 'Plan not found' });
     
-    console.log('Plan found:', { id: plan.id, user_id: plan.user_id, assign_to: plan.assign_to });
+  console.log('Plan found:', { id: plan.id, user_id: plan.user_id, assign_to: plan.assign_to });
+
+  // Remove any linked assignments (and their artifacts) before deleting the plan
+  const linkedAssignments = await db('training_plan_assignments')
+    .where({ web_plan_id: plan.id, gym_id: req.user.gym_id });
+
+  for (const assignment of linkedAssignments) {
+    try {
+      await purgeAssignmentArtifacts(assignment);
+    } catch (assignmentCleanupErr) {
+      console.error(`❌ Failed to purge artifacts for assignment ${assignment.id}:`, assignmentCleanupErr?.message || assignmentCleanupErr);
+    }
+    await db('training_plan_assignments').where({ id: assignment.id, gym_id: req.user.gym_id }).del();
+  }
+
+  // Clean any daily plans that might have been directly linked to this plan id
+  try {
+    const deletedDailyPlansForPlan = await db('daily_training_plans')
+      .where({ is_stats_record: false })
+      .where(function() {
+        this.where('source_plan_id', plan.id)
+            .orWhere('source_plan_id', plan.id.toString());
+      })
+      .modify((qb) => {
+        if (plan.user_id) qb.andWhere({ user_id: plan.user_id });
+        if (plan.gym_id != null) qb.andWhere({ gym_id: plan.gym_id });
+      })
+      .del();
+    if (deletedDailyPlansForPlan) {
+      console.log(`✅ Deleted ${deletedDailyPlansForPlan} direct daily plans linked to plan ${plan.id}`);
+    }
+  } catch (planDailyErr) {
+    console.error('❌ Error deleting direct daily plans for plan:', planDailyErr?.message || planDailyErr);
+  }
 
     if (unassign_only === 'true') {
       // If this row is a clone (assigned plan with a user_id), DELETE it entirely
@@ -790,6 +975,7 @@ exports.assign = async (req, res, next) => {
           web_plan_id: plan.id,
           trainer_id: resolvedAssignTo || plan.trainer_id || req.user.id,
           user_id: parseInt(user_id),
+          // COPY start/end dates exactly from training plan so portal + assignment match
           start_date: plan.start_date,
           end_date: plan.end_date,
           category: plan.category,
@@ -868,6 +1054,7 @@ exports.assign = async (req, res, next) => {
         web_plan_id: plan.id,
         trainer_id: resolvedAssignTo || plan.trainer_id || req.user.id,
         user_id: parseInt(user_id),
+        // COPY start/end dates exactly from training plan so portal + assignment match
         start_date: plan.start_date,
         end_date: plan.end_date,
         category: plan.category,
@@ -1119,7 +1306,11 @@ exports.updateAssignment = async (req, res, next) => {
         console.log(`WARNING: Empty string found in field: ${key}`);
       }
     });
-
+    
+    // CRITICAL: Ensure updated_at is set when updating assignment
+    // This ensures the mirror entry in app_manual_training_plans can sync the same timestamp
+    filteredUpdateData.updated_at = new Date();
+    
     // Update assignment
     const [updated] = await db('training_plan_assignments')
       .where({ id, gym_id: req.user.gym_id })
@@ -1137,6 +1328,7 @@ exports.updateAssignment = async (req, res, next) => {
         console.log(`🔄 Smart updating assignment mobile plan ${mobilePlan.id} for user ${mobilePlan.user_id}`);
         
         // Update mobile plan basic info
+        // CRITICAL: Sync updated_at from assignment to keep dates in sync
         await db('app_manual_training_plans')
           .where({ id: mobilePlan.id })
           .update({
@@ -1146,6 +1338,7 @@ exports.updateAssignment = async (req, res, next) => {
             total_workouts: updated.total_workouts || 0,
             total_exercises: updated.total_exercises || 0,
             training_minutes: updated.training_minutes || 0,
+            updated_at: updated.updated_at || new Date(), // Sync updated_at from assignment
           });
 
         // Smart update mobile plan items if exercises_details changed
@@ -1189,54 +1382,7 @@ exports.deleteAssignment = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Assignment not found' });
     }
 
-    // Delete related daily training plans first
-    try {
-      // Handle both 'web_assigned' and 'web_assigne' (typo variant) for robustness
-      // Also handle both string and integer source_plan_id values (column is integer, but some records may have string)
-      const dailyPlansQuery = db('daily_training_plans')
-        .where({
-          user_id: assignment.user_id,
-          is_stats_record: false
-        })
-        .whereIn('plan_type', ['web_assigned', 'web_assigne'])
-        .where(function() {
-          // Match both string and integer versions of source_plan_id
-          this.where('source_plan_id', assignment.id)
-              .orWhere('source_plan_id', assignment.id.toString());
-        });
-
-      // Add gym_id filter if assignment has gym_id
-      if (assignment.gym_id != null) {
-        dailyPlansQuery.andWhere({ gym_id: assignment.gym_id });
-      }
-
-      const deletedDailyPlansCount = await dailyPlansQuery.del();
-      console.log(`✅ Deleted ${deletedDailyPlansCount} daily training plans for assignment ${id}`);
-    } catch (dailyPlansErr) {
-      console.error('❌ Error deleting daily training plans for assignment:', dailyPlansErr?.message || dailyPlansErr);
-      // Continue with deletion even if daily plans deletion fails
-    }
-
-    // Delete mobile mirror
-    try {
-      const mobilePlan = await db('app_manual_training_plans')
-        .where({ web_plan_id: assignment.id })
-        .first();
-
-      if (mobilePlan) {
-        // Delete mobile plan items
-        await db('app_manual_training_plan_items')
-          .where({ plan_id: mobilePlan.id })
-          .del();
-
-        // Delete mobile plan
-        await db('app_manual_training_plans')
-          .where({ id: mobilePlan.id })
-          .del();
-      }
-    } catch (mirrorErr) {
-      console.error('Assignment delete mirror to mobile failed:', mirrorErr?.message || mirrorErr);
-    }
+    await purgeAssignmentArtifacts(assignment);
 
     // Delete assignment
     await db('training_plan_assignments')
@@ -1356,4 +1502,46 @@ exports.updateAssignmentProgress = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+
+async function purgeAssignmentArtifacts(assignment) {
+  if (!assignment) return;
+
+  // Delete related daily training plans
+  try {
+    const dailyPlansQuery = db('daily_training_plans')
+      .where({ is_stats_record: false })
+      .where(function() {
+        this.where('source_plan_id', assignment.id)
+            .orWhere('source_plan_id', assignment.id.toString());
+      })
+      .modify((qb) => {
+        if (assignment.user_id) qb.andWhere({ user_id: assignment.user_id });
+        if (assignment.gym_id != null) qb.andWhere({ gym_id: assignment.gym_id });
+      });
+
+    const deletedDailyPlansCount = await dailyPlansQuery.del();
+    console.log(`✅ Deleted ${deletedDailyPlansCount} daily training plans for assignment ${assignment.id}`);
+  } catch (dailyPlansErr) {
+    console.error('❌ Error deleting daily training plans for assignment:', dailyPlansErr?.message || dailyPlansErr);
+  }
+
+  // Delete mobile mirror
+  try {
+    const mobilePlan = await db('app_manual_training_plans')
+      .where({ web_plan_id: assignment.id })
+      .first();
+
+    if (mobilePlan) {
+      await db('app_manual_training_plan_items')
+        .where({ plan_id: mobilePlan.id })
+        .del();
+
+      await db('app_manual_training_plans')
+        .where({ id: mobilePlan.id })
+        .del();
+    }
+  } catch (mirrorErr) {
+    console.error('Assignment delete mirror to mobile failed:', mirrorErr?.message || mirrorErr);
+  }
+}
 

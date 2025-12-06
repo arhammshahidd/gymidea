@@ -1,11 +1,27 @@
 const jwt = require('jsonwebtoken');
 
 const signToken = (payload, expiresIn = '7d') => {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is not defined in environment variables');
+  }
+  try {
+    return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+  } catch (error) {
+    console.error('JWT Signing Error:', error);
+    throw new Error('Failed to sign JWT token: ' + error.message);
+  }
 };
 
 const verifyToken = (token) => {
-  return jwt.verify(token, process.env.JWT_SECRET);
+  if (!process.env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is not defined in environment variables');
+  }
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    console.error('JWT Verification Error:', error);
+    throw error;
+  }
 };
 
 // Helper function to check token version against database

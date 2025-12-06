@@ -66,28 +66,62 @@ exports.getMobileStats = async (req, res, next) => {
     const shouldRefresh = refresh === 'true' || refresh === true;
     
     // IMPORTANT: Filter by planType to ensure manual and assigned plans don't interfere
-    // If planType is not provided, default to null (will return most recent stats for backward compatibility)
-    const normalizedPlanType = planType || null;
+    // If planType is not provided, default to 'web_assigned' for backward compatibility
+    // (Most mobile users are on assigned plans, so this is the safest default)
+    const normalizedPlanType = planType || 'web_assigned';
     
     console.log(`📊 getMobileStats - Request from user ${userId}:`, {
       planType: normalizedPlanType,
       refresh: shouldRefresh,
-      queryParams: { refresh, planType }
+      queryParams: { refresh, planType },
+      defaulted: !planType ? 'YES (defaulted to web_assigned)' : 'NO'
     });
     
-    if (normalizedPlanType) {
-      console.log(`📊 getMobileStats - Fetching stats for planType: ${normalizedPlanType}`);
-    } else {
-      console.log(`⚠️ getMobileStats - WARNING: No planType specified! This may return wrong stats. For AI plans, use planType=ai_generated`);
+    // First, check if there are any completed plans for this plan type
+    const { calculateUserStats } = require('../utils/statsCalculator');
+    const completedPlansCheck = await db('daily_training_plans')
+      .where({ 
+        user_id: userId, 
+        is_completed: true, 
+        is_stats_record: false 
+      })
+      .whereNotNull('completed_at')
+      .whereIn('plan_type', normalizedPlanType === 'web_assigned' ? ['web_assigned', 'web_assigne'] : [normalizedPlanType])
+      .count('* as count')
+      .first();
+    
+    const completedCount = parseInt(completedPlansCheck?.count || 0);
+    console.log(`📊 getMobileStats - Found ${completedCount} completed plans for planType: ${normalizedPlanType}`);
+    
+    if (completedCount === 0 && !shouldRefresh) {
+      console.warn(`⚠️ getMobileStats - No completed plans found for planType ${normalizedPlanType}. Stats will be empty.`);
     }
     
     const stats = await getUserStats(userId, shouldRefresh, normalizedPlanType);
     
     if (!stats) {
       console.error(`❌ getMobileStats - No stats found for user ${userId} with planType: ${normalizedPlanType}`);
+      
+      // If no stats record exists, try to create one
+      if (!shouldRefresh) {
+        console.log(`📊 getMobileStats - Attempting to create stats record for planType: ${normalizedPlanType}`);
+        const { updateUserStats } = require('../utils/statsCalculator');
+        const newStats = await updateUserStats(userId);
+        
+        // Try to get the specific plan type's stats
+        const retryStats = await getUserStats(userId, false, normalizedPlanType);
+        if (retryStats) {
+          console.log(`✅ getMobileStats - Successfully created and retrieved stats for planType: ${normalizedPlanType}`);
+          return res.json({
+            success: true,
+            data: retryStats
+          });
+        }
+      }
+      
       return res.status(404).json({
         success: false,
-        message: 'Stats not found for this user'
+        message: `Stats not found for this user with planType: ${normalizedPlanType}`
       });
     }
     
@@ -96,8 +130,12 @@ exports.getMobileStats = async (req, res, next) => {
       planType: normalizedPlanType,
       daily_workouts_days: stats.daily_workouts ? Object.keys(stats.daily_workouts).length : 0,
       recent_workouts_count: stats.recent_workouts ? stats.recent_workouts.length : 0,
-      weekly_total_workouts: stats.weekly_progress ? stats.weekly_progress.total_workouts : 0,
-      monthly_total_workouts: stats.monthly_progress ? stats.monthly_progress.total_workouts : 0
+      weekly_completed: stats.weekly_progress ? stats.weekly_progress.completed : 0,
+      weekly_total: stats.weekly_progress ? stats.weekly_progress.total_workouts : 0,
+      monthly_completed: stats.monthly_progress ? stats.monthly_progress.completed : 0,
+      monthly_total: stats.monthly_progress ? stats.monthly_progress.total_workouts : 0,
+      total_workouts: stats.total_workouts || 0,
+      longest_streak: stats.longest_streak || 0
     });
     
     res.json({

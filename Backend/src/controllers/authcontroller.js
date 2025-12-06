@@ -3,96 +3,153 @@ const bcrypt = require('bcrypt');
 const jwt = require('../utils/jwt');
 
 exports.superAdminLogin = async (req, res) => {
-  const rawPhone = req.body.phone ?? req.body.contact_number;
-  const { password } = req.body;
-  const user = await db('super_admins').where({ phone: rawPhone }).first();
-  if (!user) return res.status(401).json({ message: 'Invalid credentials' });
-  const ok = await bcrypt.compare(password, user.password);
-  if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
-  const token = jwt.signToken({ 
-    id: user.id, 
-    role: 'SUPER_ADMIN',
-    token_version: user.token_version || 1
-  });
-  res.json({ token, user: { id: user.id, name: user.name, phone: user.phone } });
+  try {
+    const rawPhone = req.body.phone ?? req.body.contact_number;
+    const { password } = req.body;
+    
+    console.log('=== SUPER ADMIN LOGIN ATTEMPT ===');
+    console.log('Phone:', rawPhone);
+    console.log('Password provided:', password ? '[PROVIDED]' : '[MISSING]');
+    console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
+    
+    const user = await db('super_admins').where({ phone: rawPhone }).first();
+    console.log('User found:', user ? 'YES' : 'NO');
+    
+    if (!user) {
+      console.log('User not found in database');
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    const ok = await bcrypt.compare(password, user.password);
+    console.log('Password match:', ok ? 'YES' : 'NO');
+    
+    if (!ok) {
+      console.log('Password mismatch');
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    console.log('Attempting to sign JWT token...');
+    const token = jwt.signToken({ 
+      id: user.id, 
+      role: 'SUPER_ADMIN',
+      token_version: user.token_version || 1
+    });
+    console.log('Token generated successfully');
+    
+    res.json({ token, user: { id: user.id, name: user.name, phone: user.phone } });
+  } catch (error) {
+    console.error('Super Admin Login Error:', error);
+    res.status(500).json({ message: 'Login failed: ' + error.message });
+  }
 };
 
 exports.gymAdminLogin = async (req, res) => {
-  const rawPhone = req.body.phone ?? req.body.contact_number;
-  const { password } = req.body;
-  
-  console.log('=== GYM ADMIN LOGIN ATTEMPT ===');
-  console.log('Phone:', rawPhone);
-  console.log('Password provided:', password ? '[PROVIDED]' : '[MISSING]');
-  
-  const admin = await db('gym_admins').where({ phone: rawPhone }).first();
-  console.log('Admin found:', admin ? 'YES' : 'NO');
-  if (admin) {
-    console.log('Admin details:', {
-      id: admin.id,
-      name: admin.name,
-      phone: admin.phone,
-      gym_id: admin.gym_id,
-      permissions_raw: admin.permissions
-    });
-  }
-  
-  if (!admin) return res.status(401).json({ message: 'Invalid credentials' });
-  const ok = await bcrypt.compare(password, admin.password);
-  console.log('Password match:', ok ? 'YES' : 'NO');
-  if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
-  
-  // Parse permissions from JSON string or use as array
-  let permissions = [];
   try {
-    if (admin.permissions) {
-      if (typeof admin.permissions === 'string') {
-        permissions = JSON.parse(admin.permissions);
-      } else if (Array.isArray(admin.permissions)) {
-        permissions = admin.permissions;
+    const rawPhone = req.body.phone ?? req.body.contact_number;
+    const { password } = req.body;
+    
+    console.log('=== GYM ADMIN LOGIN ATTEMPT ===');
+    console.log('Phone:', rawPhone);
+    console.log('Password provided:', password ? '[PROVIDED]' : '[MISSING]');
+    console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
+    
+    const admin = await db('gym_admins').where({ phone: rawPhone }).first();
+    console.log('Admin found:', admin ? 'YES' : 'NO');
+    if (admin) {
+      console.log('Admin details:', {
+        id: admin.id,
+        name: admin.name,
+        phone: admin.phone,
+        gym_id: admin.gym_id,
+        permissions_raw: admin.permissions
+      });
+    }
+    
+    if (!admin) {
+      console.log('Admin not found in database');
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    const ok = await bcrypt.compare(password, admin.password);
+    console.log('Password match:', ok ? 'YES' : 'NO');
+    if (!ok) {
+      console.log('Password mismatch');
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    
+    // Parse permissions from JSON string or use as array
+    let permissions = [];
+    try {
+      if (admin.permissions) {
+        if (typeof admin.permissions === 'string') {
+          permissions = JSON.parse(admin.permissions);
+        } else if (Array.isArray(admin.permissions)) {
+          permissions = admin.permissions;
+        } else {
+          permissions = [];
+        }
       } else {
         permissions = [];
       }
-    } else {
+      console.log('Parsed permissions:', permissions);
+    } catch (err) {
+      console.error('Error parsing permissions:', err);
       permissions = [];
     }
-    console.log('Parsed permissions:', permissions);
-  } catch (err) {
-    console.error('Error parsing permissions:', err);
-    permissions = [];
-  }
-  
-  const token = jwt.signToken({ 
-    id: admin.id, 
-    role: 'GYM_ADMIN', 
-    gymId: admin.gym_id,
-    token_version: admin.token_version || 1
-  });
-  
-  const responseData = { 
-    token, 
-    admin: { 
+    
+    console.log('Attempting to sign JWT token...');
+    const token = jwt.signToken({ 
       id: admin.id, 
-      name: admin.name, 
-      gym_id: admin.gym_id,
-      permissions: permissions
-    } 
-  };
-  
-  console.log('Login response data:', responseData);
-  res.json(responseData);
+      role: 'GYM_ADMIN', 
+      gymId: admin.gym_id,
+      token_version: admin.token_version || 1
+    });
+    console.log('Token generated successfully');
+    
+    const responseData = { 
+      token, 
+      admin: { 
+        id: admin.id, 
+        name: admin.name, 
+        gym_id: admin.gym_id,
+        permissions: permissions
+      } 
+    };
+    
+    console.log('Login response data:', responseData);
+    res.json(responseData);
+  } catch (error) {
+    console.error('Gym Admin Login Error:', error);
+    res.status(500).json({ message: 'Login failed: ' + error.message });
+  }
 };
 
 exports.userLogin = async (req, res) => {
-  const rawPhone = req.body.phone ?? req.body.contact_number;
-  const { password } = req.body;
   try {
+    const rawPhone = req.body.phone ?? req.body.contact_number;
+    const { password } = req.body;
+    
+    console.log('=== USER LOGIN ATTEMPT ===');
+    console.log('Phone:', rawPhone);
+    console.log('Password provided:', password ? '[PROVIDED]' : '[MISSING]');
+    console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
+    
     const user = await db('users').where({ phone: rawPhone }).first();
-    if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+    console.log('User found:', user ? 'YES' : 'NO');
+    
+    if (!user) {
+      console.log('User not found in database');
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
 
     const ok = await bcrypt.compare(password, user.password);
-    if (!ok) return res.status(401).json({ message: 'Invalid credentials' });
+    console.log('Password match:', ok ? 'YES' : 'NO');
+    if (!ok) {
+      console.log('Password mismatch');
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
 
+    console.log('Attempting to sign JWT token...');
     // Generate JWT with role USER
     const token = jwt.signToken({
       id: user.id,
@@ -100,6 +157,7 @@ exports.userLogin = async (req, res) => {
       gymId: user.gym_id,
       token_version: user.token_version || 1
     });
+    console.log('Token generated successfully');
 
     res.json({
       token,
@@ -112,8 +170,8 @@ exports.userLogin = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Login failed' });
+    console.error('User Login Error:', err);
+    res.status(500).json({ message: 'Login failed: ' + (err.message || 'Unknown error') });
   }
 };
 
@@ -129,6 +187,7 @@ exports.trainerLogin = async (req, res, next) => {
     console.log('=== TRAINER LOGIN ATTEMPT ===');
     console.log('Phone:', rawPhone);
     console.log('Password provided:', password ? '[PROVIDED]' : '[MISSING]');
+    console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
     
     const trainer = await db('trainers').where({ phone: rawPhone }).first();
     console.log('Trainer found:', trainer ? 'YES' : 'NO');
@@ -151,9 +210,11 @@ exports.trainerLogin = async (req, res, next) => {
     console.log('Password match:', validPassword ? 'YES' : 'NO');
     
     if (!validPassword) {
+      console.log('Password mismatch');
       return res.status(400).json({ success: false, message: 'Invalid credentials' });
     }
 
+    console.log('Attempting to sign JWT token...');
     const token = jwt.signToken({
         id: trainer.id,
         gym_id: trainer.gym_id,
@@ -161,6 +222,7 @@ exports.trainerLogin = async (req, res, next) => {
         permissions: trainer.permissions,
       token_version: trainer.token_version || 1
     }, '1d');
+    console.log('Token generated successfully');
 
     const normalizedPermissions = typeof trainer.permissions === 'string'
       ? safeParseJSON(trainer.permissions, [])

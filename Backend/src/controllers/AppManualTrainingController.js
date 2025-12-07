@@ -71,6 +71,7 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
     }
 
     const dailyPlans = [];
+    const insertedPlans = [];
 
     // Convert daily plans (from saved distribution or fallback) to mobile format
     for (const dayPlan of dailyPlansSource) {
@@ -81,21 +82,115 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
       const totalWeight = dayItems.reduce((sum, item) => sum + (item.weight_kg || 0), 0);
       const totalMinutes = dayItems.reduce((sum, item) => sum + (item.training_minutes || item.minutes || 0), 0);
       
-      dailyPlans.push({
+      // Normalize date to YYYY-MM-DD format
+      let planDate = dayPlan.date;
+      if (planDate instanceof Date) {
+        planDate = planDate.toISOString().split('T')[0];
+      } else if (typeof planDate === 'string') {
+        planDate = new Date(planDate).toISOString().split('T')[0];
+      }
+      
+      const dailyPlanData = {
         user_id,
         gym_id,
-        plan_date: dayPlan.date,
+        plan_date: planDate,
         plan_type: 'manual',
         source_plan_id: plan.id,
-        plan_category: plan.exercise_plan_category,
-        // workout_name removed - can be derived from exercises_details if needed
-        user_level: dayItems[0]?.user_level || 'Beginner',
-        exercises_details: JSON.stringify(dayItems)
-      });
+        plan_category: plan.exercise_plan_category || 'General',
+        user_level: dayItems[0]?.user_level || plan.user_level || 'Beginner',
+        exercises_details: JSON.stringify(dayItems),
+        is_stats_record: false
+      };
+      
+      // Check if daily plan already exists (using unique constraint fields)
+      const existing = await db('daily_training_plans')
+        .where({
+          user_id: user_id,
+          plan_date: planDate,
+          plan_type: 'manual',
+          source_plan_id: plan.id,
+          is_stats_record: false
+        })
+        .modify((qb) => { 
+          if (gym_id != null) {
+            qb.andWhere({ gym_id: gym_id });
+          }
+        })
+        .first();
+      
+      let dailyPlan;
+      if (existing) {
+        // Update existing plan
+        const [updated] = await db('daily_training_plans')
+          .where({ id: existing.id })
+          .update({
+            exercises_details: JSON.stringify(dayItems),
+            plan_category: plan.exercise_plan_category || 'General',
+            user_level: dayItems[0]?.user_level || plan.user_level || 'Beginner',
+            updated_at: new Date()
+          })
+          .returning('*');
+        dailyPlan = updated;
+        console.log(`✅ Updated existing daily plan ${updated.id} for date ${planDate}`);
+      } else {
+        // Create new daily plan - wrap in try-catch to handle duplicate key errors
+        try {
+          const [inserted] = await db('daily_training_plans')
+            .insert(dailyPlanData)
+            .returning('*');
+          dailyPlan = inserted;
+          console.log(`✅ Created daily plan ${inserted.id} for date ${planDate}`);
+        } catch (insertErr) {
+          // Handle duplicate key constraint violation
+          if (insertErr.code === '23505' && insertErr.constraint === 'daily_training_plans_user_plan_unique') {
+            console.log(`⚠️ Duplicate key detected - plan already exists for manual plan (user_id: ${user_id}, plan_date: ${planDate}, plan_type: manual, source_plan_id: ${plan.id}). Fetching existing plan...`);
+            
+            // Fetch the existing plan that caused the conflict
+            const existingPlan = await db('daily_training_plans')
+              .where({
+                user_id: user_id,
+                plan_date: planDate,
+                plan_type: 'manual',
+                source_plan_id: plan.id,
+                is_stats_record: false
+              })
+              .modify((qb) => { 
+                if (gym_id != null) {
+                  qb.andWhere({ gym_id: gym_id });
+                }
+              })
+              .first();
+            
+            if (existingPlan) {
+              // Update the existing plan with new data
+              const [updated] = await db('daily_training_plans')
+                .where({ id: existingPlan.id })
+                .update({
+                  exercises_details: JSON.stringify(dayItems),
+                  plan_category: plan.exercise_plan_category || 'General',
+                  user_level: dayItems[0]?.user_level || plan.user_level || 'Beginner',
+                  updated_at: new Date()
+                })
+                .returning('*');
+              dailyPlan = updated;
+              console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (date: ${planDate}, plan_type: manual)`);
+            } else {
+              console.error(`❌ CRITICAL: Duplicate key error but couldn't find existing plan!`, insertErr);
+              // Skip this plan and continue
+              continue;
+            }
+          } else {
+            // Re-throw if it's not a duplicate key error
+            console.error(`❌ Error inserting daily plan for date ${planDate}:`, insertErr);
+            throw insertErr;
+          }
+        }
+      }
+      
+      if (dailyPlan) {
+        insertedPlans.push(dailyPlan);
+      }
     }
-    
-    // Insert daily plans
-    const insertedPlans = await db('daily_training_plans').insert(dailyPlans).returning('*');
     
     // Insert plan items
     for (const dailyPlan of insertedPlans) {
@@ -205,19 +300,39 @@ exports.createPlan = async (req, res) => {
 
     // Automatically create daily plans for easy mobile access
     try {
-      await createDailyTrainingPlansFromPlan(plan, planItems, targetUserId, gymId);
+      const createdPlans = await createDailyTrainingPlansFromPlan(plan, planItems, targetUserId, gymId);
+      if (createdPlans && createdPlans.length > 0) {
+        console.log(`✅ Created ${createdPlans.length} daily training plans for manual plan ${plan.id}`);
+      } else {
+        console.warn(`⚠️ No daily plans were created for manual plan ${plan.id} - this might indicate an issue`);
+      }
     } catch (dailyPlanError) {
-      console.error('Failed to create daily plans:', dailyPlanError);
-      // Don't fail the main request if daily plans creation fails
+      console.error('❌ Failed to create daily plans for manual plan:', {
+        plan_id: plan.id,
+        user_id: targetUserId,
+        error: dailyPlanError.message,
+        stack: dailyPlanError.stack
+      });
+      // Don't fail the main request if daily plans creation fails, but log it clearly
     }
 
     // Sync daily plans from manual plan to daily_training_plans (similar to assigned plans)
+    // This ensures plans are properly synced even if createDailyTrainingPlansFromPlan had issues
     try {
       const { syncDailyPlansFromManualPlanHelper } = require('./DailyTrainingController');
-      await syncDailyPlansFromManualPlanHelper(plan.id);
+      const syncedPlans = await syncDailyPlansFromManualPlanHelper(plan.id);
+      if (syncedPlans && syncedPlans.length > 0) {
+        console.log(`✅ Synced ${syncedPlans.length} daily plans from manual plan ${plan.id}`);
+      } else {
+        console.warn(`⚠️ No daily plans were synced for manual plan ${plan.id} - this might indicate an issue`);
+      }
     } catch (syncError) {
-      console.error('Failed to sync daily plans from manual plan:', syncError);
-      // Don't fail the main request if sync fails
+      console.error('❌ Failed to sync daily plans from manual plan:', {
+        plan_id: plan.id,
+        error: syncError.message,
+        stack: syncError.stack
+      });
+      // Don't fail the main request if sync fails, but log it clearly
     }
 
     // Get approval_id if plan is already approved (unlikely for new plan, but check anyway)
@@ -480,11 +595,50 @@ exports.listPlans = async (req, res) => {
     // This ensures "Plans" tab only shows manual plans, not assigned plans
     // Assigned plans should only appear in "Schedules" tab via /api/trainingPlans/assignments/user/:user_id
     try {
-      // web_plan_id is an integer column, so we only need to check for NULL
-      // Assigned plans will have a non-null web_plan_id (the assignment ID)
+      const targetUserIdForFilter = requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer' 
+        ? (user_id ? Number(user_id) : requestingUserId)
+        : requestingUserId;
+      
+      // PRIMARY FILTER: Exclude plans with web_plan_id set (these are mirrored from assignments)
+      // When an assignment is created, it creates a mirrored plan with web_plan_id = assignment.id
+      // True manual plans have web_plan_id = NULL
       qb = qb.whereNull('web_plan_id');
       
-      console.log(`📋 listPlans - Filtering out assigned plans (plans with web_plan_id). Only returning true manual plans.`);
+      // SECONDARY FILTER: Exclude plans that have a corresponding assignment by date range
+      // This catches edge cases where web_plan_id might be NULL but the plan is still an assignment
+      // We check if there's an assignment with matching user_id, start_date, and end_date
+      const assignments = await db('training_plan_assignments')
+        .where({ user_id: targetUserIdForFilter })
+        .modify((qb) => {
+          if (gymId) {
+            qb.andWhere({ gym_id: gymId });
+          }
+        })
+        .select('start_date', 'end_date');
+      
+      if (assignments.length > 0) {
+        // Exclude plans whose start_date and end_date exactly match any assignment
+        // This ensures no assigned plans slip through even if web_plan_id is NULL
+    qb = qb.where(function() {
+          assignments.forEach((assignment, index) => {
+            if (index === 0) {
+              this.whereNot(function() {
+                this.where({ start_date: assignment.start_date })
+                  .andWhere({ end_date: assignment.end_date });
+              });
+            } else {
+              this.andWhereNot(function() {
+                this.where({ start_date: assignment.start_date })
+                  .andWhere({ end_date: assignment.end_date });
+              });
+            }
+          });
+    });
+    
+        console.log(`📋 listPlans - Excluding ${assignments.length} assigned plans by web_plan_id filter (IS NULL) and date range matching. Only returning true manual plans.`);
+      } else {
+        console.log(`📋 listPlans - No assignments found for user ${targetUserIdForFilter}. Only returning true manual plans (web_plan_id IS NULL).`);
+      }
     } catch (filterErr) {
       console.error('❌ Error applying web_plan_id filter:', filterErr);
       // Continue without the filter if it fails (shouldn't happen, but be safe)

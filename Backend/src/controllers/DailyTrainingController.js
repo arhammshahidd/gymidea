@@ -1297,6 +1297,16 @@ exports.submitDailyCompletion = async (req, res, next) => {
 
     // CRITICAL: Log the incoming request to track if multiple requests are being sent
     const requestTimestamp = new Date();
+
+    // Helper: normalize any date-like value to LOCAL YYYY-MM-DD (avoid UTC shift)
+    const normalizeLocalDate = (value) => {
+      try {
+        const d = value instanceof Date ? value : new Date(value);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      } catch (e) {
+        return '';
+      }
+    };
     console.log(`📥 submitDailyCompletion - Incoming request:`, {
       daily_plan_id: daily_plan_id,
       user_id: user_id,
@@ -1952,23 +1962,18 @@ exports.submitDailyCompletion = async (req, res, next) => {
         if (lastCompletedPlan) {
           // Normalize dates
           let lastCompletedDateStr, requestedDateStr;
-          if (lastCompletedPlan.plan_date instanceof Date) {
-            const d = lastCompletedPlan.plan_date;
-            lastCompletedDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          } else if (typeof lastCompletedPlan.plan_date === 'string') {
-            lastCompletedDateStr = lastCompletedPlan.plan_date.split('T')[0];
-          } else {
-            lastCompletedDateStr = new Date(lastCompletedPlan.plan_date).toISOString().split('T')[0];
-          }
+          // Helper to normalize any date (Date or string) to LOCAL YYYY-MM-DD to avoid UTC shift
+          const normalizeLocalDate = (value) => {
+            try {
+              const d = value instanceof Date ? value : new Date(value);
+              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            } catch (e) {
+              return '';
+            }
+          };
           
-          if (planBeforeUpdate.plan_date instanceof Date) {
-            const d = planBeforeUpdate.plan_date;
-            requestedDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          } else if (typeof planBeforeUpdate.plan_date === 'string') {
-            requestedDateStr = planBeforeUpdate.plan_date.split('T')[0];
-          } else {
-            requestedDateStr = new Date(planBeforeUpdate.plan_date).toISOString().split('T')[0];
-          }
+          lastCompletedDateStr = normalizeLocalDate(lastCompletedPlan.plan_date);
+          requestedDateStr = normalizeLocalDate(planBeforeUpdate.plan_date);
           
           const lastCompletedDate = new Date(lastCompletedDateStr + 'T00:00:00.000Z');
           const requestedDate = new Date(requestedDateStr + 'T00:00:00.000Z');
@@ -2132,6 +2137,29 @@ exports.submitDailyCompletion = async (req, res, next) => {
             requestedDateStr = planBeforeUpdate.plan_date.split('T')[0];
           } else {
             requestedDateStr = new Date(planBeforeUpdate.plan_date).toISOString().split('T')[0];
+          }
+          
+          // Fetch earliest plan date for this assignment to avoid blocking Day 1 because of timezone shifts
+          let earliestPlanDateStr = null;
+          try {
+            const earliestPlan = await trx('daily_training_plans')
+              .where({
+                user_id,
+                source_plan_id: planBeforeUpdate.source_plan_id,
+                is_stats_record: false
+              })
+              .min('plan_date as min_date')
+              .first();
+            if (earliestPlan && earliestPlan.min_date) {
+              earliestPlanDateStr = normalizeLocalDate(earliestPlan.min_date);
+            }
+          } catch (e) {
+            console.warn('⚠️ Unable to fetch earliest plan date for hard guard check', e);
+          }
+          
+          // If this is the earliest plan date for the assignment, allow (Day 1 start)
+          if (earliestPlanDateStr && requestedDateStr === earliestPlanDateStr) {
+            console.log(`✅ HARD GUARD: Requested plan ${daily_plan_id} is the earliest plan date (${requestedDateStr}) for source_plan_id ${planBeforeUpdate.source_plan_id}. Allowing to avoid blocking Day 1.`);
           }
           
           // Calculate if requested date is exactly 1 day after last completed date

@@ -74,7 +74,8 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
     const insertedPlans = [];
 
     // Convert daily plans (from saved distribution or fallback) to mobile format
-    for (const dayPlan of dailyPlansSource) {
+    for (let index = 0; index < dailyPlansSource.length; index++) {
+      const dayPlan = dailyPlansSource[index];
       const dayItems = dayPlan.workouts || [];
       
       const totalSets = dayItems.reduce((sum, item) => sum + (item.sets || 0), 0);
@@ -82,18 +83,13 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
       const totalWeight = dayItems.reduce((sum, item) => sum + (item.weight_kg || 0), 0);
       const totalMinutes = dayItems.reduce((sum, item) => sum + (item.training_minutes || item.minutes || 0), 0);
       
-      // Normalize date to YYYY-MM-DD format
-      let planDate = dayPlan.date;
-      if (planDate instanceof Date) {
-        planDate = planDate.toISOString().split('T')[0];
-      } else if (typeof planDate === 'string') {
-        planDate = new Date(planDate).toISOString().split('T')[0];
-      }
+      // Calculate day_number from array index (1-indexed: Day 1, Day 2, etc.)
+      const dayNumber = index + 1;
       
       const dailyPlanData = {
         user_id,
         gym_id,
-        plan_date: planDate,
+        day_number: dayNumber,
         plan_type: 'manual',
         source_plan_id: plan.id,
         plan_category: plan.exercise_plan_category || 'General',
@@ -106,7 +102,7 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
       const existing = await db('daily_training_plans')
         .where({
           user_id: user_id,
-          plan_date: planDate,
+          day_number: dayNumber,
           plan_type: 'manual',
           source_plan_id: plan.id,
           is_stats_record: false
@@ -131,7 +127,7 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
           })
           .returning('*');
         dailyPlan = updated;
-        console.log(`✅ Updated existing daily plan ${updated.id} for date ${planDate}`);
+        console.log(`✅ Updated existing daily plan ${updated.id} for Day ${dayNumber}`);
       } else {
         // Create new daily plan - wrap in try-catch to handle duplicate key errors
         try {
@@ -139,17 +135,17 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
             .insert(dailyPlanData)
             .returning('*');
           dailyPlan = inserted;
-          console.log(`✅ Created daily plan ${inserted.id} for date ${planDate}`);
+          console.log(`✅ Created daily plan ${inserted.id} for Day ${dayNumber}`);
         } catch (insertErr) {
           // Handle duplicate key constraint violation
           if (insertErr.code === '23505' && insertErr.constraint === 'daily_training_plans_user_plan_unique') {
-            console.log(`⚠️ Duplicate key detected - plan already exists for manual plan (user_id: ${user_id}, plan_date: ${planDate}, plan_type: manual, source_plan_id: ${plan.id}). Fetching existing plan...`);
+            console.log(`⚠️ Duplicate key detected - plan already exists for manual plan (user_id: ${user_id}, day_number: ${dayNumber}, plan_type: manual, source_plan_id: ${plan.id}). Fetching existing plan...`);
             
             // Fetch the existing plan that caused the conflict
             const existingPlan = await db('daily_training_plans')
               .where({
                 user_id: user_id,
-                plan_date: planDate,
+                day_number: dayNumber,
                 plan_type: 'manual',
                 source_plan_id: plan.id,
                 is_stats_record: false
@@ -173,7 +169,7 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
                 })
                 .returning('*');
               dailyPlan = updated;
-              console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (date: ${planDate}, plan_type: manual)`);
+              console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (Day ${dayNumber}, plan_type: manual)`);
             } else {
               console.error(`❌ CRITICAL: Duplicate key error but couldn't find existing plan!`, insertErr);
               // Skip this plan and continue
@@ -181,7 +177,7 @@ exports.createDailyTrainingPlansFromPlan = async function createDailyTrainingPla
             }
           } else {
             // Re-throw if it's not a duplicate key error
-            console.error(`❌ Error inserting daily plan for date ${planDate}:`, insertErr);
+            console.error(`❌ Error inserting daily plan for Day ${dayNumber}:`, insertErr);
             throw insertErr;
           }
         }

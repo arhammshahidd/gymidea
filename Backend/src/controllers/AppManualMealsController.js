@@ -10,9 +10,8 @@ async function createDailyNutritionPlansFromPlan(plan, items, user_id, gym_id) {
     const dailyPlans = [];
     
     for (let i = 0; i < totalDays; i++) {
-      const planDate = new Date(startDate);
-      planDate.setDate(startDate.getDate() + i);
-      const dateStr = planDate.toISOString().split('T')[0];
+      // Calculate day_number from array index (1-indexed: Day 1, Day 2, etc.)
+      const dayNumber = i + 1;
       
       // Distribute items across days
       const itemsPerDay = Math.ceil(items.length / totalDays);
@@ -29,7 +28,7 @@ async function createDailyNutritionPlansFromPlan(plan, items, user_id, gym_id) {
       dailyPlans.push({
         user_id,
         gym_id,
-        plan_date: dateStr,
+        day_number: dayNumber,
         plan_type: 'manual',
         source_plan_id: plan.id,
         plan_category: plan.meal_category,

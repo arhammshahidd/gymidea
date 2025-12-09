@@ -1093,7 +1093,7 @@ exports.getDailyPlans = async (req, res, next) => {
         source_plan_id: id,
         gym_id: req.user.gym_id 
       })
-      .orderBy('plan_date', 'asc');
+      .orderBy('day_number', 'asc');
     
     // If user_id is specified, filter by user
     if (user_id) {

@@ -9,9 +9,7 @@ async function generateDailyPlansFromExistingPlan(planType, sourcePlanId, user_i
   const dailyPlans = [];
   
   for (let i = 0; i < totalDays; i++) {
-    const planDate = new Date(startDate);
-    planDate.setDate(startDate.getDate() + i);
-    const dateStr = planDate.toISOString().split('T')[0];
+    const dayNumber = i + 1; // Day 1, Day 2, ...
     
     if (planType === 'training') {
       // Get training plan details
@@ -49,7 +47,7 @@ async function generateDailyPlansFromExistingPlan(planType, sourcePlanId, user_i
         dailyPlans.push({
           user_id,
           gym_id,
-          plan_date: dateStr,
+          day_number: dayNumber,
           plan_type: 'manual', // or determine from source
           source_plan_id: sourcePlanId,
           plan_category: planData.exercise_plan_category || planData.category || 'General',
@@ -105,7 +103,7 @@ async function generateDailyPlansFromExistingPlan(planType, sourcePlanId, user_i
         dailyPlans.push({
           user_id,
           gym_id,
-          plan_date: dateStr,
+          day_number: dayNumber,
           plan_type: 'manual', // or determine from source
           source_plan_id: sourcePlanId,
           plan_category: planData.meal_category || planData.meal_plan_category || 'General',
@@ -125,7 +123,7 @@ async function generateDailyPlansFromExistingPlan(planType, sourcePlanId, user_i
 // Create daily training plans
 exports.createDailyTrainingPlans = async (req, res) => {
   try {
-    const { user_id, plan_type, source_plan_id, start_date, end_date, plan_category, exercises } = req.body;
+    const { user_id, source_plan_id, start_date, end_date, plan_category, exercises } = req.body;
     const gym_id = req.user?.gym_id || null;
     
     if (!user_id || !start_date || !end_date || !plan_category) {
@@ -145,9 +143,7 @@ exports.createDailyTrainingPlans = async (req, res) => {
       const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
       
       for (let i = 0; i < totalDays; i++) {
-        const planDate = new Date(startDate);
-        planDate.setDate(startDate.getDate() + i);
-        const dateStr = planDate.toISOString().split('T')[0];
+        const dayNumber = i + 1;
         
         const exerciseArray = Array.isArray(exercises) ? exercises : [];
         const totalSets = exerciseArray.reduce((sum, ex) => sum + (ex.sets || 0), 0);
@@ -158,8 +154,8 @@ exports.createDailyTrainingPlans = async (req, res) => {
         dailyPlans.push({
           user_id,
           gym_id,
-          plan_date: dateStr,
-          plan_type: plan_type || 'manual',
+          day_number: dayNumber,
+          plan_type: 'manual',
           source_plan_id: source_plan_id || null,
           plan_category,
           // workout_name removed
@@ -228,10 +224,8 @@ exports.createDailyNutritionPlans = async (req, res) => {
       const endDate = new Date(end_date);
       const totalDays = Math.max(1, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
       
-      for (let i = 0; i < totalDays; i++) {
-        const planDate = new Date(startDate);
-        planDate.setDate(startDate.getDate() + i);
-        const dateStr = planDate.toISOString().split('T')[0];
+  for (let i = 0; i < totalDays; i++) {
+    const dayNumber = i + 1; // Day index (1-based)
         
         const mealArray = Array.isArray(meals) ? meals : [];
         const dailyTotals = mealArray.reduce((totals, meal) => {
@@ -245,7 +239,7 @@ exports.createDailyNutritionPlans = async (req, res) => {
         dailyPlans.push({
           user_id,
           gym_id,
-          plan_date: dateStr,
+          day_number: dayNumber,
           plan_type: plan_type || 'manual',
           source_plan_id: source_plan_id || null,
           plan_category,
@@ -295,17 +289,16 @@ exports.createDailyNutritionPlans = async (req, res) => {
   }
 };
 
-// Get user's daily plans for a specific date range
+// Get user's daily plans using day_number (manual/assigned/ai)
 exports.getUserDailyPlans = async (req, res) => {
   try {
-    const { user_id, start_date, end_date, plan_type } = req.query;
+    const { user_id, start_day, end_day, plan_type } = req.query;
     const requestingUserId = req.user.id;
     const requestingUserRole = req.user.role;
     
     // SECURITY: Ensure proper user isolation
     let targetUserId;
     if (requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer') {
-      // Admin/trainer can access specific user's plans in their gym
       if (!user_id) {
         return res.status(400).json({ 
           success: false, 
@@ -314,36 +307,33 @@ exports.getUserDailyPlans = async (req, res) => {
       }
       targetUserId = Number(user_id);
     } else {
-      // Regular users can only access their own plans
-      // Ignore user_id from query and use authenticated user's ID
       targetUserId = requestingUserId;
     }
     
-    const query = {};
-    if (start_date) query.plan_date = start_date;
-    if (end_date) {
-      // Add date range logic
-    }
+    const startDayNumber = start_day ? Number(start_day) : null;
+    const endDayNumber = end_day ? Number(end_day) : null;
     
-    // Get training plans
+    // Get training plans (day_number based)
     const trainingPlans = await db('daily_training_plans')
       .where({ user_id: targetUserId })
-      .modify((queryBuilder) => {
-        if (start_date) queryBuilder.where('plan_date', '>=', start_date);
-        if (end_date) queryBuilder.where('plan_date', '<=', end_date);
-        if (plan_type) queryBuilder.where('plan_type', plan_type);
+      .modify((qb) => {
+        if (startDayNumber != null) qb.where('day_number', '>=', startDayNumber);
+        if (endDayNumber != null) qb.where('day_number', '<=', endDayNumber);
+        if (plan_type) qb.where('plan_type', plan_type);
       })
-      .orderBy('plan_date', 'asc');
+      .orderBy('source_plan_id', 'asc')
+      .orderBy('day_number', 'asc');
     
-    // Get nutrition plans
+    // Get nutrition plans (day_number based)
     const nutritionPlans = await db('daily_nutrition_plans')
       .where({ user_id: targetUserId })
-      .modify((queryBuilder) => {
-        if (start_date) queryBuilder.where('plan_date', '>=', start_date);
-        if (end_date) queryBuilder.where('plan_date', '<=', end_date);
-        if (plan_type) queryBuilder.where('plan_type', plan_type);
+      .modify((qb) => {
+        if (startDayNumber != null) qb.where('day_number', '>=', startDayNumber);
+        if (endDayNumber != null) qb.where('day_number', '<=', endDayNumber);
+        if (plan_type) qb.where('plan_type', plan_type);
       })
-      .orderBy('plan_date', 'asc');
+      .orderBy('source_plan_id', 'asc')
+      .orderBy('day_number', 'asc');
     
     // Get detailed items for each plan
     const trainingPlanIds = trainingPlans.map(p => p.id);
@@ -481,7 +471,7 @@ exports.updateDailyPlanCompletion = async (req, res) => {
   }
 };
 
-// Get today's plans for a user
+// Get today's plans for a user (using day_number)
 exports.getTodaysPlans = async (req, res) => {
   try {
     const { user_id } = req.params;
@@ -503,15 +493,76 @@ exports.getTodaysPlans = async (req, res) => {
       targetUserId = requestingUserId;
     }
     
-    // Get today's training plan
-    const trainingPlan = await db('daily_training_plans')
-      .where({ user_id: targetUserId, plan_date: today })
-      .first();
+    // Get today's training plan using day_number-based logic
+    // Since day_number is sequential and doesn't depend on dates, we find the next incomplete plan
+    // This is more aligned with the day_number system than trying to map "today" to a day_number
+    const trainingPlans = await db('daily_training_plans')
+      .where({ user_id: targetUserId })
+      .whereNotNull('day_number')
+      .where('is_stats_record', false)
+      .orderBy('source_plan_id', 'asc')
+      .orderBy('day_number', 'asc');
     
-    // Get today's nutrition plan
-    const nutritionPlan = await db('daily_nutrition_plans')
-      .where({ user_id: targetUserId, plan_date: today })
-      .first();
+    // Find the next incomplete plan (or most recent plan if all are completed)
+    // Group by source_plan_id and find the first incomplete day_number
+    const plansBySource = {};
+    trainingPlans.forEach(plan => {
+      const sourceId = plan.source_plan_id || 'no_source';
+      if (!plansBySource[sourceId]) {
+        plansBySource[sourceId] = [];
+      }
+      plansBySource[sourceId].push(plan);
+    });
+    
+    // For each source, find the first incomplete plan, or the most recent plan if all completed
+    let trainingPlan = null;
+    Object.keys(plansBySource).forEach(sourceId => {
+      const sourcePlans = plansBySource[sourceId];
+      const incompletePlan = sourcePlans.find(p => !p.is_completed);
+      if (incompletePlan) {
+        if (!trainingPlan || incompletePlan.day_number < trainingPlan.day_number) {
+          trainingPlan = incompletePlan;
+        }
+      } else if (sourcePlans.length > 0) {
+        // All completed, use the most recent (highest day_number)
+        const mostRecent = sourcePlans[sourcePlans.length - 1];
+        if (!trainingPlan || mostRecent.day_number > trainingPlan.day_number) {
+          trainingPlan = mostRecent;
+        }
+      }
+    });
+    
+    // Similar logic for nutrition plans
+    const nutritionPlans = await db('daily_nutrition_plans')
+      .where({ user_id: targetUserId })
+      .whereNotNull('day_number')
+      .orderBy('source_plan_id', 'asc')
+      .orderBy('day_number', 'asc');
+    
+    const nutritionPlansBySource = {};
+    nutritionPlans.forEach(plan => {
+      const sourceId = plan.source_plan_id || 'no_source';
+      if (!nutritionPlansBySource[sourceId]) {
+        nutritionPlansBySource[sourceId] = [];
+      }
+      nutritionPlansBySource[sourceId].push(plan);
+    });
+    
+    let nutritionPlan = null;
+    Object.keys(nutritionPlansBySource).forEach(sourceId => {
+      const sourcePlans = nutritionPlansBySource[sourceId];
+      const incompletePlan = sourcePlans.find(p => !p.is_completed);
+      if (incompletePlan) {
+        if (!nutritionPlan || incompletePlan.day_number < nutritionPlan.day_number) {
+          nutritionPlan = incompletePlan;
+        }
+      } else if (sourcePlans.length > 0) {
+        const mostRecent = sourcePlans[sourcePlans.length - 1];
+        if (!nutritionPlan || mostRecent.day_number > nutritionPlan.day_number) {
+          nutritionPlan = mostRecent;
+        }
+      }
+    });
     
     // Get items for each plan
     let trainingItems = [];

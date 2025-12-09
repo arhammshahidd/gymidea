@@ -125,81 +125,19 @@ async function calculateUserStats(userId, planType = null) {
       console.log(`📊 Stats - No planType filter specified, will get ALL completed plans for user ${userId}`);
     }
     
-    let completedPlans = await completedPlansQuery.orderBy('plan_date', 'desc');
+    let completedPlans = await completedPlansQuery.orderBy('day_number', 'desc');
     
     console.log(`📊 Stats - Found ${completedPlans.length} completed plans for user ${userId}${planType ? ` (plan_type: ${planType})` : ' (all plan types)'}`);
     
-    // CRITICAL: Filter out plans that are before assignment start_date
-    // This ensures plans like 2025-12-05 are excluded when assignment start_date is 2025-12-06
-    let assignmentStartDatesMap = {};
-    const plansWithSourceId = completedPlans.filter(p => p.source_plan_id && !p.is_stats_record);
-    if (plansWithSourceId.length > 0) {
-      try {
-        const sourceIds = [...new Set(plansWithSourceId.map(p => p.source_plan_id.toString()))];
-        const assignments = await db('training_plan_assignments')
-          .whereIn('id', sourceIds.map(id => parseInt(id) || 0).filter(id => id > 0))
-          .select('id', 'start_date');
-        
-        assignments.forEach(assignment => {
-          let startDateStr;
-          if (assignment.start_date instanceof Date) {
-            const d = assignment.start_date;
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            startDateStr = `${year}-${month}-${day}`;
-          } else if (typeof assignment.start_date === 'string') {
-            startDateStr = assignment.start_date.split('T')[0];
-          } else {
-            return; // Skip invalid dates
-          }
-          assignmentStartDatesMap[assignment.id.toString()] = startDateStr;
-          console.log(`📅 Assignment ${assignment.id} start_date: ${startDateStr}`);
-        });
-      } catch (assignmentErr) {
-        console.error('⚠️ Error fetching assignment start dates for stats filter:', assignmentErr);
-      }
-    }
-    
-    // Filter out plans before assignment start_date
-    const plansBeforeStartDate = completedPlans.filter(plan => {
-      if (!plan.source_plan_id) return false; // Only check plans with source_plan_id (assignments)
-      
-      const assignmentStartDate = assignmentStartDatesMap[plan.source_plan_id.toString()];
-      if (!assignmentStartDate) return false; // No assignment found, skip check
-      
-      // Normalize plan_date to YYYY-MM-DD format
-      let planDateStr;
-      if (plan.plan_date instanceof Date) {
-        const d = plan.plan_date;
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        planDateStr = `${year}-${month}-${day}`;
-      } else if (typeof plan.plan_date === 'string') {
-        planDateStr = plan.plan_date.split('T')[0];
-      } else {
-        return false; // Invalid date, skip
-      }
-      
-      if (planDateStr < assignmentStartDate) {
-        console.log(`⏭️ Skipping plan ${plan.id} (${planDateStr}) - before assignment start_date (${assignmentStartDate})`);
-        return true; // This plan should be filtered out
-      }
-      return false; // Keep this plan
-    });
-    
-    if (plansBeforeStartDate.length > 0) {
-      console.log(`📊 Stats - Filtering out ${plansBeforeStartDate.length} plan(s) that are before assignment start_date`);
-      const planIdsToFilter = new Set(plansBeforeStartDate.map(p => p.id));
-      completedPlans = completedPlans.filter(p => !planIdsToFilter.has(p.id));
-    }
+    // NOTE: With day_number, we don't need to filter by calendar dates
+    // Day 1, Day 2, etc. are sequential and don't depend on actual calendar dates
+    // All plans with valid day_number are included in stats
     
     // Debug: Log sample of completed plans to verify they're being found
     if (completedPlans.length > 0) {
       console.log(`📊 Stats - Sample completed plans (first 3):`, completedPlans.slice(0, 3).map(p => ({
         id: p.id,
-        plan_date: p.plan_date,
+        day_number: p.day_number,
         plan_type: p.plan_type,
         source_plan_id: p.source_plan_id,
         is_completed: p.is_completed,
@@ -215,10 +153,10 @@ async function calculateUserStats(userId, planType = null) {
       } else if (planType) {
         debugQuery = debugQuery.where({ plan_type: planType });
       }
-      const allPlansDebug = await debugQuery.select('id', 'plan_date', 'plan_type', 'is_completed', 'completed_at').limit(10);
+      const allPlansDebug = await debugQuery.select('id', 'day_number', 'plan_type', 'is_completed', 'completed_at').limit(10);
       console.log(`📊 Stats - Debug: Found ${allPlansDebug.length} total plans (completed or not):`, allPlansDebug.map(p => ({
         id: p.id,
-        plan_date: p.plan_date,
+        day_number: p.day_number,
         plan_type: p.plan_type,
         is_completed: p.is_completed,
         completed_at: p.completed_at ? 'has_value' : 'null'
@@ -230,12 +168,12 @@ async function calculateUserStats(userId, planType = null) {
       const aiPlans = completedPlans.filter(p => p.plan_type === 'ai_generated');
       console.log(`📊 Stats - AI Generated plans found: ${aiPlans.length}`);
       aiPlans.forEach(plan => {
-        console.log(`  🤖 AI Plan ${plan.id}: plan_date=${plan.plan_date}, is_completed=${plan.is_completed}, completed_at=${plan.completed_at}, plan_type=${plan.plan_type}`);
+        console.log(`  🤖 AI Plan ${plan.id}: day_number=${plan.day_number}, is_completed=${plan.is_completed}, completed_at=${plan.completed_at}, plan_type=${plan.plan_type}`);
       });
     }
     
     completedPlans.forEach(plan => {
-      console.log(`  - Completed plan ${plan.id}: plan_date=${plan.plan_date}, plan_type=${plan.plan_type}, is_completed=${plan.is_completed}, completed_at=${plan.completed_at}, is_stats_record=${plan.is_stats_record}`);
+      console.log(`  - Completed plan ${plan.id}: day_number=${plan.day_number}, plan_type=${plan.plan_type}, is_completed=${plan.is_completed}, completed_at=${plan.completed_at}, is_stats_record=${plan.is_stats_record}`);
     });
     
     // Additional validation: Filter out any plans that don't have is_completed = true
@@ -247,11 +185,11 @@ async function calculateUserStats(userId, planType = null) {
       const hasCompletedAt = plan.completed_at != null && plan.completed_at !== 'null';
       
       if (!isCompleted) {
-        console.warn(`⚠️ Stats - WARNING: Plan ${plan.id} (plan_date: ${plan.plan_date}) has is_completed=${plan.is_completed} (type: ${typeof plan.is_completed}) but was returned by query! Filtering out.`);
+        console.warn(`⚠️ Stats - WARNING: Plan ${plan.id} (day_number: ${plan.day_number}) has is_completed=${plan.is_completed} (type: ${typeof plan.is_completed}) but was returned by query! Filtering out.`);
         return false;
       }
       if (!hasCompletedAt) {
-        console.warn(`⚠️ Stats - WARNING: Plan ${plan.id} (plan_date: ${plan.plan_date}) has is_completed=${plan.is_completed} but no completed_at timestamp! Filtering out.`);
+        console.warn(`⚠️ Stats - WARNING: Plan ${plan.id} (day_number: ${plan.day_number}) has is_completed=${plan.is_completed} but no completed_at timestamp! Filtering out.`);
         return false;
       }
       return true;
@@ -301,40 +239,11 @@ async function calculateUserStats(userId, planType = null) {
       }
     }
     
-    let allPlans = await allPlansQuery.orderBy('plan_date', 'asc');
+    let allPlans = await allPlansQuery.orderBy('day_number', 'asc');
     
-    // CRITICAL: Also filter allPlans by assignment start_date to ensure consistency
-    // This prevents plans before start_date from being counted in task calculations
-    if (Object.keys(assignmentStartDatesMap).length > 0) {
-      const allPlansBeforeStartDate = allPlans.filter(plan => {
-        if (!plan.source_plan_id) return false; // Only check plans with source_plan_id (assignments)
-        
-        const assignmentStartDate = assignmentStartDatesMap[plan.source_plan_id.toString()];
-        if (!assignmentStartDate) return false; // No assignment found, skip check
-        
-        // Normalize plan_date to YYYY-MM-DD format
-        let planDateStr;
-        if (plan.plan_date instanceof Date) {
-          const d = plan.plan_date;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          planDateStr = `${year}-${month}-${day}`;
-        } else if (typeof plan.plan_date === 'string') {
-          planDateStr = plan.plan_date.split('T')[0];
-        } else {
-          return false; // Invalid date, skip
-        }
-        
-        return planDateStr < assignmentStartDate; // Filter out if before start_date
-      });
-      
-      if (allPlansBeforeStartDate.length > 0) {
-        console.log(`📊 Stats - Filtering out ${allPlansBeforeStartDate.length} total plan(s) (including incomplete) that are before assignment start_date`);
-        const allPlanIdsToFilter = new Set(allPlansBeforeStartDate.map(p => p.id));
-        allPlans = allPlans.filter(p => !allPlanIdsToFilter.has(p.id));
-      }
-    }
+    // NOTE: With day_number, we don't need to filter by calendar dates
+    // Day 1, Day 2, etc. are sequential and don't depend on actual calendar dates
+    // All plans with valid day_number are included in stats
     
     console.log(`📊 Stats - Found ${allPlans.length} total plans (including incomplete) for user ${userId}`);
     console.log(`📊 Stats - Breakdown: ${finalCompletedPlans.length} completed, ${allPlans.length - finalCompletedPlans.length} incomplete`);
@@ -396,18 +305,12 @@ async function calculateUserStats(userId, planType = null) {
       return sum;
     }, 0);
     
-    // Daily workouts - group by date
+    // Daily workouts - group by day_number
     // Store ALL workouts for each day as arrays of workout names
-    // Structure: {"2025-11-04": ["Chest", "Cardio"], "2025-11-03": ["Legs"]}
-    // IMPORTANT: Use plan_date for grouping (the date the workout was planned for)
+    // Structure: {"1": ["Chest", "Cardio"], "2": ["Legs"]} where keys are day_number
+    // IMPORTANT: Use day_number for grouping (Day 1, Day 2, etc.)
     // This ensures each day's workouts are stored separately and don't replace each other
     // Frontend can get count using array.length
-    
-    // Get today's date for use in calculations (used in remaining tasks, today's plans, etc.)
-    // Use getTodayDate() which already returns local date in YYYY-MM-DD format
-    const todayDateStr = getTodayDate();
-    
-    console.log(`📊 Stats - Today's date: ${todayDateStr}`);
     
     const dailyWorkouts = {};
     console.log(`📊 Stats - Processing ${finalCompletedPlans.length} completed plans for daily workouts`);
@@ -418,48 +321,25 @@ async function calculateUserStats(userId, planType = null) {
         return;
       }
       
-      // Use plan_date for grouping (the date the workout was planned for)
+      // Use day_number for grouping (Day 1, Day 2, etc.)
       // This ensures day 1 workouts are stored under day 1, day 2 workouts under day 2, etc.
-      // They won't replace each other because they have different dates
-      let dateToUse = plan.plan_date;
+      // They won't replace each other because they have different day_numbers
+      const dayNumber = plan.day_number;
       
-      console.log(`📊 Stats - Processing completed plan ${plan.id}: plan_date=${plan.plan_date}, is_completed=${plan.is_completed}, completed_at=${plan.completed_at}`);
+      console.log(`📊 Stats - Processing completed plan ${plan.id}: day_number=${dayNumber}, is_completed=${plan.is_completed}, completed_at=${plan.completed_at}`);
       
-      if (!dateToUse) {
-        console.log(`  ⏭️ Skipping plan ${plan.id}: no plan_date available (plan_date: ${plan.plan_date}, completed_at: ${plan.completed_at})`);
+      if (!dayNumber || dayNumber == null) {
+        console.log(`  ⏭️ Skipping plan ${plan.id}: no day_number available (day_number: ${dayNumber}, completed_at: ${plan.completed_at})`);
         return;
       }
       
-      // Normalize date to YYYY-MM-DD format for consistent keys
-      // CRITICAL: Use LOCAL date components to avoid timezone shifts
-      // When dates are Date objects with timezone, toISOString() converts to UTC
-      // which can shift the date by one day (e.g., Dec 02 GMT+0500 becomes Dec 01 UTC)
-      let normalizedDate;
-      if (dateToUse instanceof Date) {
-        // Use LOCAL date components, not UTC
-        const d = dateToUse;
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        normalizedDate = `${year}-${month}-${day}`;
-      } else if (typeof dateToUse === 'string') {
-        if (dateToUse.includes('T')) {
-          // If it has time component, extract just the date part
-          normalizedDate = dateToUse.split('T')[0];
-        } else {
-          // Already YYYY-MM-DD format
-          normalizedDate = dateToUse.split('T')[0];
-        }
-      } else {
-        console.log(`  ⏭️ Skipping plan ${plan.id}: invalid plan_date type: ${typeof dateToUse}`);
-        return;
-      }
+      const dayKey = String(dayNumber); // Use day_number as string key (e.g., "1", "2", "3")
       
-      console.log(`📊 Stats - Plan ${plan.id}: Using date ${normalizedDate} for grouping (plan_date: ${plan.plan_date}, completed_at: ${plan.completed_at})`);
+      console.log(`📊 Stats - Plan ${plan.id}: Using day_number ${dayKey} for grouping (completed_at: ${plan.completed_at})`);
       
-      // Initialize daily workout entry as an array (simple structure: date -> array of workout names)
-      if (!dailyWorkouts[normalizedDate]) {
-        dailyWorkouts[normalizedDate] = [];
+      // Initialize daily workout entry as an array (simple structure: day_number -> array of workout names)
+      if (!dailyWorkouts[dayKey]) {
+        dailyWorkouts[dayKey] = [];
       }
       
       // Get workouts from this plan's exercises_details
@@ -533,14 +413,14 @@ async function calculateUserStats(userId, planType = null) {
       }
     });
     
-    console.log(`📊 Stats - Daily workouts grouped by date: ${Object.keys(dailyWorkouts).length} days`);
+    console.log(`📊 Stats - Daily workouts grouped by day_number: ${Object.keys(dailyWorkouts).length} days`);
     if (Object.keys(dailyWorkouts).length === 0) {
-      console.warn(`⚠️ Stats - WARNING: No daily workouts found! This means no completed plans have valid plan_date or exercises_details.`);
+      console.warn(`⚠️ Stats - WARNING: No daily workouts found! This means no completed plans have valid day_number or exercises_details.`);
       console.warn(`  - Completed plans count: ${finalCompletedPlans.length}`);
       if (finalCompletedPlans.length > 0) {
         console.warn(`  - Sample completed plan:`, {
           id: finalCompletedPlans[0].id,
-          plan_date: finalCompletedPlans[0].plan_date,
+          day_number: finalCompletedPlans[0].day_number,
           is_completed: finalCompletedPlans[0].is_completed,
           exercises_details_type: typeof finalCompletedPlans[0].exercises_details,
           exercises_details_length: finalCompletedPlans[0].exercises_details ? (typeof finalCompletedPlans[0].exercises_details === 'string' ? finalCompletedPlans[0].exercises_details.length : JSON.stringify(finalCompletedPlans[0].exercises_details).length) : 'null'
@@ -554,23 +434,33 @@ async function calculateUserStats(userId, planType = null) {
     }
     
     // Calculate longest streak
-    // Parse dates properly to handle ISO format
+    // Use completed_at dates for streak calculation (calendar dates when workouts were completed)
     // CRITICAL: Use LOCAL date components to avoid timezone shifts
     const completedDates = finalCompletedPlans
       .map(plan => {
-        if (!plan.plan_date) return null;
+        if (!plan.completed_at) return null;
         let normalizedDate;
-        if (plan.plan_date instanceof Date) {
-          // Use LOCAL date components, not UTC
-          const d = plan.plan_date;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          normalizedDate = `${year}-${month}-${day}`;
-        } else if (typeof plan.plan_date === 'string') {
-          // Extract date part from string
-          normalizedDate = plan.plan_date.split('T')[0];
-        } else {
+        try {
+          let completedDate;
+          if (plan.completed_at instanceof Date) {
+            completedDate = new Date(plan.completed_at);
+          } else if (typeof plan.completed_at === 'string') {
+            completedDate = new Date(plan.completed_at);
+          } else {
+            return null;
+          }
+          
+          if (completedDate) {
+            // Use LOCAL date components, not UTC
+            const d = completedDate;
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            normalizedDate = `${year}-${month}-${day}`;
+          } else {
+            return null;
+          }
+        } catch (e) {
           return null;
         }
         return normalizedDate; // Return YYYY-MM-DD format
@@ -583,27 +473,23 @@ async function calculateUserStats(userId, planType = null) {
     console.log(`📊 Stats - Streak: Longest streak calculated: ${longestStreak} days`);
     
     // Recent workouts - Get from daily_workouts (last 6 days)
-    // Extract workouts from the 6 most recent days in dailyWorkouts
-    // Sort by date (most recent first) and take first 6 days
+    // Extract workouts from the 6 highest day_numbers in dailyWorkouts
+    // Sort by day_number (highest first) and take first 6 days
     const recentWorkouts = [];
     const recentDays = [];
     
-    // Get all dates from dailyWorkouts and sort them (most recent first)
-    const dates = Object.keys(dailyWorkouts).sort((a, b) => {
-      const dateA = new Date(a);
-      const dateB = new Date(b);
-      return dateB - dateA; // Descending order (most recent first)
-    });
+    // Get all day_numbers from dailyWorkouts and sort them (highest first)
+    const dayNumbers = Object.keys(dailyWorkouts).map(d => parseInt(d)).filter(d => !isNaN(d)).sort((a, b) => b - a);
     
-    // Take only the 6 most recent days
-    const sixMostRecentDays = dates.slice(0, 6);
+    // Take only the 6 highest day_numbers
+    const sixMostRecentDays = dayNumbers.slice(0, 6).map(d => String(d));
     
-    console.log(`📊 Stats - Recent workouts: Found ${dates.length} days with workouts, using ${sixMostRecentDays.length} most recent days`);
-    console.log(`📊 Stats - Recent workouts: Most recent 6 days: ${sixMostRecentDays.join(', ')}`);
+    console.log(`📊 Stats - Recent workouts: Found ${dayNumbers.length} days with workouts, using ${sixMostRecentDays.length} most recent days`);
+    console.log(`📊 Stats - Recent workouts: Most recent 6 days (by day_number): ${sixMostRecentDays.join(', ')}`);
     
     // Extract workout names from each of the 6 most recent days
-    for (const date of sixMostRecentDays) {
-      const workoutArray = dailyWorkouts[date];
+    for (const dayKey of sixMostRecentDays) {
+      const workoutArray = dailyWorkouts[dayKey];
       if (workoutArray && Array.isArray(workoutArray) && workoutArray.length > 0) {
         // Add all workouts from this day
         workoutArray.forEach(workoutName => {
@@ -612,29 +498,29 @@ async function calculateUserStats(userId, planType = null) {
           }
         });
         recentDays.push({
-          date: date,
+          day_number: parseInt(dayKey),
           workouts: workoutArray,
           count: workoutArray.length
         });
-        console.log(`📊 Stats - Recent workouts: Added ${workoutArray.length} workouts from ${date} (${workoutArray.join(', ')})`);
-          }
-        }
+        console.log(`📊 Stats - Recent workouts: Added ${workoutArray.length} workouts from Day ${dayKey} (${workoutArray.join(', ')})`);
+      }
+    }
     
     console.log(`📊 Stats - Recent workouts: Total ${recentWorkouts.length} unique workouts from ${sixMostRecentDays.length} days`);
     console.log(`📊 Stats - Recent workouts: Workout names: ${recentWorkouts.join(', ')}`);
     
     // Weekly progress
-    // IMPORTANT: For completed plans, use completed_at date if available (for today's completions)
-    // For incomplete plans, use plan_date
+    // IMPORTANT: For completed plans, use completed_at date (for accurate week/month grouping)
+    // For incomplete plans, skip them (they don't have a completion date)
     const weekDates = getCurrentWeekDates();
     console.log(`📊 Stats - Weekly: Calculating week range from ${weekDates.start.toISOString()} to ${weekDates.end.toISOString()}`);
     console.log(`📊 Stats - Weekly: Week start (date only): ${weekDates.start.toISOString().split('T')[0]}, Week end (date only): ${weekDates.end.toISOString().split('T')[0]}`);
     
     const weekPlans = allPlans.filter(plan => {
       // Determine which date to use for filtering
-      // For completed plans, prefer completed_at date (for accurate week/month grouping)
-      // For incomplete plans, use plan_date
-      let dateToUse = plan.plan_date;
+      // For completed plans, use completed_at date (for accurate week/month grouping)
+      // For incomplete plans, skip them (they don't have a completion date)
+      let dateToUse = null;
       
       if (plan.is_completed && plan.completed_at) {
         try {
@@ -658,16 +544,15 @@ async function calculateUserStats(userId, planType = null) {
             // For completed plans, use completed_at date for accurate week/month grouping
             // This ensures plans completed this week are counted in this week's stats
             dateToUse = completedDateStr;
-            console.log(`📊 Stats - Weekly: Plan ${plan.id} completed on ${completedDateStr}, using completed_at instead of plan_date (${plan.plan_date})`);
+            console.log(`📊 Stats - Weekly: Plan ${plan.id} (Day ${plan.day_number}) completed on ${completedDateStr}`);
           }
         } catch (e) {
           console.error(`Error parsing completed_at for plan ${plan.id}:`, e);
-          dateToUse = plan.plan_date;
         }
       }
       
       if (!dateToUse) {
-        console.log(`  ⏭️ Skipping plan ${plan.id}: no date available (plan_date: ${plan.plan_date}, completed_at: ${plan.completed_at})`);
+        console.log(`  ⏭️ Skipping plan ${plan.id}: no completion date available (day_number: ${plan.day_number}, completed_at: ${plan.completed_at})`);
         return false;
       }
       
@@ -719,7 +604,7 @@ async function calculateUserStats(userId, planType = null) {
     
     console.log(`📊 Stats - Weekly: Found ${weekPlans.length} plans for week (${weekDates.start.toISOString().split('T')[0]} to ${weekDates.end.toISOString().split('T')[0]})`);
     weekPlans.forEach(plan => {
-      console.log(`  - Week plan ${plan.id}: plan_date=${plan.plan_date}, is_completed=${plan.is_completed}, is_stats_record=${plan.is_stats_record}`);
+      console.log(`  - Week plan ${plan.id}: day_number=${plan.day_number}, is_completed=${plan.is_completed}, is_stats_record=${plan.is_stats_record}`);
     });
     
     const weekCompleted = weekPlans.filter(plan => plan.is_completed).length;
@@ -811,36 +696,20 @@ async function calculateUserStats(userId, planType = null) {
     // Weekly batching logic: Every 6 days, new batch starts
     // Batch sizes: 12, 24, 34, 44, 54, ... (first batch 12, then 24, then +10 each time)
     // Calculate which batch we're in based on days with completed workouts
+    // Use completed_at dates for batching (calendar dates when workouts were completed)
     const weeklyCompletedDates = completedWeekPlans.map(plan => {
-      let dateToUse = plan.plan_date;
-      if (plan.is_completed && plan.completed_at) {
-        try {
-          const completedDate = new Date(plan.completed_at);
-          // CRITICAL: Use LOCAL date components to avoid timezone shifts
-          const d = completedDate;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        } catch (e) {
-          // If parsing fails, try to extract from plan_date
-          if (plan.plan_date instanceof Date) {
-            const d = plan.plan_date;
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-          }
-          return typeof plan.plan_date === 'string' ? plan.plan_date.split('T')[0] : null;
-        }
-      }
-      // Normalize plan_date
-      if (dateToUse instanceof Date) {
-        const d = dateToUse;
+      if (!plan.completed_at) return null;
+      
+      try {
+        const completedDate = new Date(plan.completed_at);
+        // CRITICAL: Use LOCAL date components to avoid timezone shifts
+        const d = completedDate;
         const year = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const day = String(d.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
+      } catch (e) {
+        return null;
       }
       return typeof dateToUse === 'string' ? dateToUse.split('T')[0] : null;
     }).filter(Boolean);
@@ -907,16 +776,16 @@ async function calculateUserStats(userId, planType = null) {
     
     // Monthly progress
     // IMPORTANT: For completed plans, use completed_at date (for accurate month grouping)
-    // For incomplete plans, use plan_date
+    // For incomplete plans, skip them (they don't have a completion date)
     const monthDates = getCurrentMonthDates();
     console.log(`📊 Stats - Monthly: Calculating month range from ${monthDates.start.toISOString()} to ${monthDates.end.toISOString()}`);
     console.log(`📊 Stats - Monthly: Month start (date only): ${monthDates.start.toISOString().split('T')[0]}, Month end (date only): ${monthDates.end.toISOString().split('T')[0]}`);
     
     const monthPlans = allPlans.filter(plan => {
       // Determine which date to use for filtering
-      // For completed plans, prefer completed_at date (for accurate month grouping)
-      // For incomplete plans, use plan_date
-      let dateToUse = plan.plan_date;
+      // For completed plans, use completed_at date (for accurate month grouping)
+      // For incomplete plans, skip them (they don't have a completion date)
+      let dateToUse = null;
       
       if (plan.is_completed && plan.completed_at) {
         try {
@@ -940,16 +809,15 @@ async function calculateUserStats(userId, planType = null) {
             // For completed plans, use completed_at date for accurate month grouping
             // This ensures plans completed this month are counted in this month's stats
             dateToUse = completedDateStr;
-            console.log(`📊 Stats - Monthly: Plan ${plan.id} completed on ${completedDateStr}, using completed_at instead of plan_date (${plan.plan_date})`);
+            console.log(`📊 Stats - Monthly: Plan ${plan.id} (Day ${plan.day_number}) completed on ${completedDateStr}`);
           }
         } catch (e) {
           console.error(`Error parsing completed_at for plan ${plan.id}:`, e);
-          dateToUse = plan.plan_date;
         }
       }
       
       if (!dateToUse) {
-        console.log(`  ⏭️ Skipping plan ${plan.id}: no date available (plan_date: ${plan.plan_date}, completed_at: ${plan.completed_at})`);
+        console.log(`  ⏭️ Skipping plan ${plan.id}: no completion date available (day_number: ${plan.day_number}, completed_at: ${plan.completed_at})`);
         return false;
       }
       
@@ -1067,35 +935,18 @@ async function calculateUserStats(userId, planType = null) {
     const monthCompletedDates = monthPlans
       .filter(plan => plan.is_completed)
       .map(plan => {
-        let dateToUse = plan.plan_date;
-        if (plan.is_completed && plan.completed_at) {
-          try {
-            const completedDate = new Date(plan.completed_at);
-            // CRITICAL: Use LOCAL date components to avoid timezone shifts
-            const d = completedDate;
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-          } catch (e) {
-            // If parsing fails, try to extract from plan_date
-            if (plan.plan_date instanceof Date) {
-              const d = plan.plan_date;
-              const year = d.getFullYear();
-              const month = String(d.getMonth() + 1).padStart(2, '0');
-              const day = String(d.getDate()).padStart(2, '0');
-              return `${year}-${month}-${day}`;
-            }
-            return typeof plan.plan_date === 'string' ? plan.plan_date.split('T')[0] : null;
-          }
-        }
-        // Normalize plan_date
-        if (dateToUse instanceof Date) {
-          const d = dateToUse;
+        if (!plan.completed_at) return null;
+        
+        try {
+          const completedDate = new Date(plan.completed_at);
+          // CRITICAL: Use LOCAL date components to avoid timezone shifts
+          const d = completedDate;
           const year = d.getFullYear();
           const month = String(d.getMonth() + 1).padStart(2, '0');
           const day = String(d.getDate()).padStart(2, '0');
           return `${year}-${month}-${day}`;
+        } catch (e) {
+          return null;
         }
         return typeof dateToUse === 'string' ? dateToUse.split('T')[0] : null;
       })
@@ -1151,9 +1002,9 @@ async function calculateUserStats(userId, planType = null) {
         .where('daily_training_plans.is_stats_record', false) // Exclude stats records
         .select(
           'daily_training_plan_items.*',
-          'daily_training_plans.plan_date'
+          'daily_training_plans.day_number'
         )
-        .orderBy('daily_training_plans.plan_date', 'desc')
+        .orderBy('daily_training_plans.day_number', 'desc')
         .orderBy('daily_training_plan_items.id', 'asc');
       
       allItems = itemsData.map(item => ({
@@ -1169,7 +1020,7 @@ async function calculateUserStats(userId, planType = null) {
         notes: item.notes,
         is_completed: item.is_completed,
         completed_at: item.completed_at,
-        plan_date: item.plan_date,
+        day_number: item.day_number,
         created_at: item.created_at,
         updated_at: item.updated_at
       }));
@@ -1424,7 +1275,7 @@ async function updateUserStats(userId) {
           console.log(`📊 updateUserStats - No existing stats record for ${planType}, will create new one`);
           
       // Create new stats record in daily_training_plans table
-      // Use NULL for plan_date since stats records don't have a specific date
+      // Use NULL for day_number since stats records don't have a specific day
           // Validate and stringify JSON fields safely
           let dailyWorkoutsJson, recentWorkoutsJson, weeklyProgressJson, monthlyProgressJson, itemsJson;
           
@@ -1465,7 +1316,7 @@ async function updateUserStats(userId) {
           
           const insertData = {
           user_id: stats.user_id,
-          plan_date: null, // NULL for stats records
+          day_number: null, // NULL for stats records (they don't represent a specific day)
             plan_type: planType, // Use the plan type for this stats record
           plan_category: 'Stats', // Placeholder category
           is_stats_record: true,

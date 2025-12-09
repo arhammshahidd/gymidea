@@ -4,7 +4,7 @@ exports.up = async function(knex) {
     table.increments('id').primary();
     table.integer('user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
     table.integer('gym_id').nullable();
-    table.date('plan_date').notNullable();
+    table.integer('day_number').nullable(); // Day number (1, 2, 3, etc.) - nullable for stats records
     
     // Plan source information
     table.string('plan_type').notNullable(); // 'manual', 'ai_generated', 'web_assigned'
@@ -27,23 +27,31 @@ exports.up = async function(knex) {
     table.boolean('is_completed').defaultTo(false);
     table.timestamp('completed_at').nullable();
     table.text('completion_notes').nullable();
+    table.boolean('is_stats_record').defaultTo(false); // Flag for stats records
     
     // Metadata
     table.timestamps(true, true);
     
     // Indexes for performance
-    table.index(['user_id', 'plan_date']);
+    table.index(['user_id', 'day_number']);
     table.index(['user_id', 'plan_type']);
-    table.index(['gym_id', 'plan_date']);
-    table.unique(['user_id', 'plan_date', 'plan_type']); // Prevent duplicate daily plans
+    table.index(['gym_id', 'day_number']);
+    table.index(['source_plan_id', 'day_number']);
   });
+
+  // Create unique constraint for daily_training_plans (partial index for non-stats records)
+  await knex.raw(`
+    CREATE UNIQUE INDEX daily_training_plans_user_day_unique 
+    ON daily_training_plans (user_id, day_number, plan_type, source_plan_id) 
+    WHERE is_stats_record = false AND day_number IS NOT NULL;
+  `);
 
   // Create daily nutrition plans table
   await knex.schema.createTable('daily_nutrition_plans', (table) => {
     table.increments('id').primary();
     table.integer('user_id').notNullable().references('id').inTable('users').onDelete('CASCADE');
     table.integer('gym_id').nullable();
-    table.date('plan_date').notNullable();
+    table.integer('day_number').nullable(); // Day number (1, 2, 3, etc.)
     
     // Plan source information
     table.string('plan_type').notNullable(); // 'manual', 'ai_generated', 'web_assigned'
@@ -68,11 +76,18 @@ exports.up = async function(knex) {
     table.timestamps(true, true);
     
     // Indexes for performance
-    table.index(['user_id', 'plan_date']);
+    table.index(['user_id', 'day_number']);
     table.index(['user_id', 'plan_type']);
-    table.index(['gym_id', 'plan_date']);
-    table.unique(['user_id', 'plan_date', 'plan_type']); // Prevent duplicate daily plans
+    table.index(['gym_id', 'day_number']);
+    table.index(['source_plan_id', 'day_number']);
   });
+
+  // Create unique constraint for daily_nutrition_plans
+  await knex.raw(`
+    CREATE UNIQUE INDEX daily_nutrition_plans_user_day_unique 
+    ON daily_nutrition_plans (user_id, day_number, plan_type, source_plan_id) 
+    WHERE day_number IS NOT NULL;
+  `);
 
   // Create daily plan items for detailed tracking
   await knex.schema.createTable('daily_training_plan_items', (table) => {

@@ -50,15 +50,16 @@ async function getUserProgressForPlan(userId, planId) {
         source_plan_id: planId,
         is_completed: true 
       })
-      .select('plan_date')
-      .orderBy('plan_date', 'asc');
+      .whereNotNull('day_number')
+      .select('day_number')
+      .orderBy('day_number', 'asc');
 
-    const completedDays = completedPlans.map(plan => plan.plan_date);
+    const completedDays = completedPlans.map(plan => plan.day_number);
     
     return {
       completedDays,
       completedCount: completedDays.length,
-      lastCompletedDate: completedDays.length > 0 ? completedDays[completedDays.length - 1] : null
+      lastCompletedDay: completedDays.length > 0 ? completedDays[completedDays.length - 1] : null
     };
   } catch (error) {
     console.error('Error getting user progress:', error);

@@ -1,9 +1,26 @@
 const db = require('../config/db');
 
-// Get daily training plans for a user
+// NOTE: Helper function convertPlanDateToDayNumber removed - day_number is now required in all requests
+// No backward compatibility needed - all clients must use day_number
+
+/**
+ * Helper function: Normalize date string to YYYY-MM-DD format
+ * @param {string} dateStr - The date string to normalize
+ * @returns {string} - Normalized date string in YYYY-MM-DD format
+ */
+const normalizeDate = (dateStr) => {
+  try {
+    const d = new Date(dateStr);
+    return d.toISOString().split('T')[0];
+  } catch (e) {
+    return dateStr;
+  }
+};
+
+// Get daily training plans for a user (day_number only)
 exports.getDailyPlans = async (req, res, next) => {
   try {
-    const { user_id, date, plan_type, include_completed } = req.query;
+    const { user_id, day_number, plan_type, include_completed } = req.query;
     const requestingUserId = req.user.id;
     const requestingUserRole = req.user.role;
     const gym_id = req.user.gym_id;
@@ -12,7 +29,7 @@ exports.getDailyPlans = async (req, res, next) => {
     let query = db('daily_training_plans')
       .select('*')
       .where('is_stats_record', false) // CRITICAL: Always exclude stats records at SQL level
-      .orderBy('plan_date', 'asc'); // Changed to 'asc' to show today first, then upcoming days
+      .orderBy('day_number', 'asc'); // Day-based sequencing using day_number
 
     // SECURITY: Ensure proper user isolation
     if (requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer') {
@@ -44,79 +61,11 @@ exports.getDailyPlans = async (req, res, next) => {
       }
     }
 
-    // Apply filters
-    // For mobile (USER role or /mobile/ route), we want to always show today's and future plans
-    // immediately after completing the current day, even if client sends a specific date.
-    // So we ignore strict date filtering in that case.
     const isMobileRequest = req.originalUrl?.includes('/mobile/') || requestingUserRole === 'USER';
     
-    // CRITICAL: Fetch assignment start dates for all source_plan_ids to filter at SQL level
-    // This prevents plans before start_date from being returned (e.g., 2025-12-01 when start_date is 2025-12-02)
-    let assignmentStartDatesMap = {};
-    if (isMobileRequest || !date) {
-      try {
-        // Get all assignments for this user to find their start dates
-        const assignments = await db('training_plan_assignments')
-          .where({ user_id: requestingUserId })
-          .select('id', 'start_date');
-        
-        assignments.forEach(assignment => {
-          let startDateStr;
-          if (assignment.start_date instanceof Date) {
-            const d = assignment.start_date;
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            startDateStr = `${year}-${month}-${day}`;
-          } else if (typeof assignment.start_date === 'string') {
-            startDateStr = assignment.start_date.split('T')[0];
-          } else {
-            return; // Skip invalid dates
-          }
-          assignmentStartDatesMap[assignment.id.toString()] = startDateStr;
-        });
-        
-        if (Object.keys(assignmentStartDatesMap).length > 0) {
-          console.log(`📅 Found ${Object.keys(assignmentStartDatesMap).length} assignment(s) with start dates for user ${requestingUserId}`);
-        }
-      } catch (assignmentErr) {
-        console.error('⚠️ Error fetching assignment start dates for SQL filter:', assignmentErr);
-      }
-    }
-    
-    if (date && !isMobileRequest) {
-      // If specific date is requested from non-mobile contexts, show plans for that date
-      query = query.andWhere('plan_date', date);
-    } else {
-      // For mobile app: Filter out completed plans from previous days
-      // Show: Today's plans (completed or not) + Future plans (completed or not)
-      // Hide: Previous days' completed plans
-      // Also show: Incomplete past plans (in case user missed a day)
-      // CRITICAL: Also exclude plans before assignment start_date
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStr = today.toISOString().split('T')[0];
-      
-      console.log(`📊 getDailyPlans - SQL Query: user_id=${requestingUserId}, today=${todayStr}, isMobileRequest=${isMobileRequest}`);
-      
-      // Query filter: Show plans that are:
-      // 1. On or after today (today and future plans, regardless of completion)
-      // 2. OR incomplete plans from past dates (in case user missed completing a past day)
-      // 3. BUT: Exclude plans before assignment start_date (if assignment exists) - handled in JavaScript
-      // Note: plan_date is a DATE column, so direct string comparison should work
-      // CRITICAL: We'll filter out completed past plans in JavaScript for more reliable handling
-      // This is simpler and more reliable than complex SQL boolean checks
-      query = query.andWhere(function() {
-        this.where('plan_date', '>=', todayStr)
-          .orWhere(function() {
-            this.where('plan_date', '<', todayStr)
-              .andWhere('is_completed', false);
-          });
-      });
-      
-      // NOTE: We'll filter by assignment start_date in JavaScript after fetching
-      // This is simpler and more reliable than complex SQL JOINs
-      // The assignmentStartDatesMap will be used in the JavaScript filtering below
+    const targetDayNumber = day_number ? Number(day_number) : null;
+    if (targetDayNumber && !isMobileRequest) {
+      query = query.andWhere('day_number', targetDayNumber);
     }
     
     // Apply plan_type filter (if not already applied above for regular users)
@@ -142,82 +91,37 @@ exports.getDailyPlans = async (req, res, next) => {
     // Log all plans returned from SQL query
     console.log(`📊 getDailyPlans - SQL query returned ${plans.length} plans`);
     plans.forEach(plan => {
-      console.log(`  - Plan ${plan.id}: plan_date=${plan.plan_date} (type: ${typeof plan.plan_date}), is_completed=${plan.is_completed}, is_stats_record=${plan.is_stats_record}`);
+      console.log(`  - Plan ${plan.id}: day_number=${plan.day_number}, is_completed=${plan.is_completed}, is_stats_record=${plan.is_stats_record}`);
     });
     
-    // CRITICAL: Validate and fix plan_type for plans from assignments
-    // If source_plan_id exists and points to an assignment, ensure plan_type is 'web_assigned'
-    const plansWithSourceId = plans.filter(p => p.source_plan_id && !p.is_stats_record);
-    if (plansWithSourceId.length > 0) {
-      const sourceIds = [...new Set(plansWithSourceId.map(p => p.source_plan_id.toString()))];
-      
-      // Check which source_plan_ids are assignments
-      const assignments = await db('training_plan_assignments')
-        .whereIn('id', sourceIds.map(id => parseInt(id) || 0).filter(id => id > 0))
-        .select('id');
-      
-      const assignmentIds = new Set(assignments.map(a => a.id.toString()));
-      
-      // Fix plans that have wrong plan_type but source_plan_id points to an assignment
-      const plansToFix = plansWithSourceId.filter(p => 
-        assignmentIds.has(p.source_plan_id.toString()) && 
-        p.plan_type !== 'web_assigned' && 
-        p.plan_type !== 'web_assigne'
-      );
-      
-      if (plansToFix.length > 0) {
-        console.warn(`⚠️ Found ${plansToFix.length} plan(s) with incorrect plan_type for assignments. Fixing...`);
-        const planIdsToFix = plansToFix.map(p => p.id);
-        
-        await db('daily_training_plans')
-          .whereIn('id', planIdsToFix)
-          .update({
-            plan_type: 'web_assigned',
-            updated_at: new Date()
-          });
-        
-        // Update the plans array with corrected plan_type
+    // Add assignment_id helper for clarity (no plan_type enforcement)
         plans.forEach(plan => {
-          if (planIdsToFix.includes(plan.id)) {
-            plan.plan_type = 'web_assigned';
-            console.log(`✅ Fixed plan_type for plan ${plan.id} to 'web_assigned'`);
-          }
-        });
+      if (plan.source_plan_id) {
+        plan.assignment_id = Number(plan.source_plan_id);
       }
-      
-      // Add assignment_id field to response for clarity
-      plans.forEach(plan => {
-        if (plan.source_plan_id && assignmentIds.has(plan.source_plan_id.toString())) {
-          plan.assignment_id = parseInt(plan.source_plan_id);
-        }
-      });
-    }
+    });
 
     // Additional filter: Remove completed plans from previous days
     // This ensures Day 1 completed workouts don't show when Day 2 is active
-    // BUT: Always show today's completed plans
+    // With day_number, we simply find the first incomplete day_number for each source
     if (!date || isMobileRequest) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStr = today.toISOString().split('T')[0];
-      
       // Add debug logging
-      console.log(`📊 getDailyPlans - Filtering ${plans.length} plans, today=${todayStr}`);
+      console.log(`📊 getDailyPlans - Filtering ${plans.length} plans by day_number`);
       
-      // IMPORTANT: Find the first incomplete plan based on plan_date.
+      // IMPORTANT: Find the first incomplete plan based on day_number.
       // This ensures we start from the next uncompleted day after reload
-      // instead of always snapping back to Day 1 or "today".
+      // instead of always snapping back to Day 1.
       // Logic:
       //   - Group plans by source_plan_id (for assigned plans, each assignment is separate)
       //   - For each source_plan_id, find the earliest plan where is_completed = false
-      //   - If all are completed for a source_plan_id, use the earliest date from that source
-      //   - Use the earliest firstIncompleteDate across all source_plan_ids
-      let firstIncompleteDate = todayStr; // Fallback: today
+      //   - If all are completed for a source_plan_id, use the earliest day_number from that source
+      //   - Use the earliest firstIncompleteDay across all source_plan_ids
+      let firstIncompleteDay = 1; // Fallback: Day 1
       
       // Group plans by source_plan_id to handle multiple assignments
       const plansBySource = {};
       plans.forEach(plan => {
-        if (!plan.plan_date) return;
+        if (plan.day_number == null) return; // Skip plans without day_number
         const sourceId = plan.source_plan_id || 'no_source';
         if (!plansBySource[sourceId]) {
           plansBySource[sourceId] = [];
@@ -230,91 +134,16 @@ exports.getDailyPlans = async (req, res, next) => {
         plan_count: plansBySource[sourceId].length
       })));
       
-      // CRITICAL: Fetch assignment start_date for each source_plan_id to ensure we don't consider plans before start_date
-      // This prevents showing plans from 2025-11-25 when assignment start_date is 2025-11-26
-      const assignmentStartDates = {};
-      const sourceIdsForAssignments = Object.keys(plansBySource).filter(id => id !== 'no_source' && id != null);
-      if (sourceIdsForAssignments.length > 0) {
-        try {
-          const assignments = await db('training_plan_assignments')
-            .whereIn('id', sourceIdsForAssignments.map(id => id.toString()))
-            .orWhereIn('id', sourceIdsForAssignments.map(id => parseInt(id) || 0).filter(id => id > 0))
-            .select('id', 'start_date');
-          
-          assignments.forEach(assignment => {
-            let startDateStr;
-            if (assignment.start_date instanceof Date) {
-              const d = assignment.start_date;
-              const year = d.getFullYear();
-              const month = String(d.getMonth() + 1).padStart(2, '0');
-              const day = String(d.getDate()).padStart(2, '0');
-              startDateStr = `${year}-${month}-${day}`;
-            } else if (typeof assignment.start_date === 'string') {
-              startDateStr = assignment.start_date.split('T')[0];
-            } else {
-              return; // Skip invalid dates
-            }
-            assignmentStartDates[assignment.id.toString()] = startDateStr;
-            console.log(`📅 Assignment ${assignment.id} start_date: ${startDateStr}`);
-          });
-        } catch (assignmentErr) {
-          console.error('⚠️ Error fetching assignment start dates:', assignmentErr);
-        }
-      }
-      
-      // Find first incomplete date for each source_plan_id
-      // CRITICAL: Only consider plans on/after the assignment's start_date
-      const firstIncompleteDatesBySource = {};
+      // Find first incomplete day_number for each source_plan_id
+      const firstIncompleteDaysBySource = {};
       Object.keys(plansBySource).forEach(sourceId => {
         const sourcePlans = [...plansBySource[sourceId]]
-          .filter(p => p.plan_date != null)
-          .sort((a, b) => {
-            let dateA, dateB;
-            if (a.plan_date instanceof Date) {
-              dateA = a.plan_date.toISOString().split('T')[0];
-            } else if (typeof a.plan_date === 'string') {
-              dateA = a.plan_date.split('T')[0];
-            } else {
-              dateA = '';
-            }
-            
-            if (b.plan_date instanceof Date) {
-              dateB = b.plan_date.toISOString().split('T')[0];
-            } else if (typeof b.plan_date === 'string') {
-              dateB = b.plan_date.split('T')[0];
-            } else {
-              dateB = '';
-            }
-            
-            return dateA.localeCompare(dateB);
-          });
-        
-        // Get assignment start_date for this source (if it's an assignment)
-        const assignmentStartDate = assignmentStartDates[sourceId];
+          .filter(p => p.day_number != null)
+          .sort((a, b) => (a.day_number || 0) - (b.day_number || 0));
         
         // Find the first incomplete plan for this source
-        // CRITICAL: Only consider plans on/after assignment start_date (if available)
-        let firstIncompleteForSource = null;
+        let firstIncompleteDayForSource = null;
         for (const plan of sourcePlans) {
-          let planDateStr;
-          if (plan.plan_date instanceof Date) {
-            const d = plan.plan_date;
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            planDateStr = `${year}-${month}-${day}`;
-          } else if (typeof plan.plan_date === 'string') {
-            planDateStr = plan.plan_date.split('T')[0];
-          } else {
-            continue;
-          }
-          
-          // CRITICAL: Skip plans that are before the assignment's start_date
-          if (assignmentStartDate && planDateStr < assignmentStartDate) {
-            console.log(`⏭️ Skipping plan ${plan.id} (${planDateStr}) - before assignment start_date (${assignmentStartDate})`);
-            continue;
-          }
-          
           // Check if plan is incomplete (handle null/undefined/false properly)
           // CRITICAL: Check all possible representations of is_completed
           // PostgreSQL can return 't'/'f' as strings, or true/false as booleans
@@ -332,84 +161,44 @@ exports.getDailyPlans = async (req, res, next) => {
           const isActuallyCompleted = isCompleted && hasCompletedAt;
           
           // Log for debugging
-          console.log(`🔍 Checking plan ${plan.id} (${planDateStr}): is_completed=${plan.is_completed} (type: ${typeof plan.is_completed}, raw: ${JSON.stringify(plan.is_completed)}), completed_at=${plan.completed_at}, isActuallyCompleted=${isActuallyCompleted}`);
+          console.log(`🔍 Checking plan ${plan.id} (Day ${plan.day_number}): is_completed=${plan.is_completed} (type: ${typeof plan.is_completed}, raw: ${JSON.stringify(plan.is_completed)}), completed_at=${plan.completed_at}, isActuallyCompleted=${isActuallyCompleted}`);
           
           if (!isActuallyCompleted) {
-            firstIncompleteForSource = planDateStr;
-            console.log(`✅ Found first incomplete plan for source_plan_id ${sourceId}: ${planDateStr} (plan_id: ${plan.id}, assignment_start: ${assignmentStartDate || 'N/A'})`);
+            firstIncompleteDayForSource = plan.day_number;
+            console.log(`✅ Found first incomplete plan for source_plan_id ${sourceId}: Day ${firstIncompleteDayForSource} (plan_id: ${plan.id})`);
             break;
           } else {
-            console.log(`⏭️ Skipping completed plan ${plan.id} (${planDateStr}) - is_completed=${plan.is_completed}, completed_at=${plan.completed_at} - looking for next incomplete plan`);
+            console.log(`⏭️ Skipping completed plan ${plan.id} (Day ${plan.day_number}) - is_completed=${plan.is_completed}, completed_at=${plan.completed_at} - looking for next incomplete plan`);
           }
         }
         
-        // If all plans for this source are completed, use the earliest date on/after start_date
-        if (!firstIncompleteForSource && sourcePlans.length > 0) {
-          // Find the earliest plan that's on/after assignment start_date
-          let earliestValidPlan = null;
-          for (const plan of sourcePlans) {
-            let planDateStr;
-            if (plan.plan_date instanceof Date) {
-              const d = plan.plan_date;
-              const year = d.getFullYear();
-              const month = String(d.getMonth() + 1).padStart(2, '0');
-              const day = String(d.getDate()).padStart(2, '0');
-              planDateStr = `${year}-${month}-${day}`;
-            } else if (typeof plan.plan_date === 'string') {
-              planDateStr = plan.plan_date.split('T')[0];
-            } else {
-              continue;
-            }
-            
-            // Only consider plans on/after assignment start_date
-            if (!assignmentStartDate || planDateStr >= assignmentStartDate) {
-              earliestValidPlan = planDateStr;
-              break;
-            }
-          }
-          
-          if (earliestValidPlan) {
-            firstIncompleteForSource = earliestValidPlan;
-            console.log(`📅 All plans completed for source_plan_id ${sourceId}, using earliest valid date (on/after start_date): ${firstIncompleteForSource}`);
-          } else if (assignmentStartDate) {
-            // If no valid plan found but we have an assignment start_date, use that
-            firstIncompleteForSource = assignmentStartDate;
-            console.log(`📅 No valid plans found for source_plan_id ${sourceId}, using assignment start_date: ${firstIncompleteForSource}`);
-          }
+        // If all plans for this source are completed, use the earliest day_number
+        if (!firstIncompleteDayForSource && sourcePlans.length > 0) {
+          firstIncompleteDayForSource = sourcePlans[0].day_number;
+          console.log(`📅 All plans completed for source_plan_id ${sourceId}, using earliest day: Day ${firstIncompleteDayForSource}`);
         }
         
-        if (firstIncompleteForSource) {
-          firstIncompleteDatesBySource[sourceId] = firstIncompleteForSource;
+        if (firstIncompleteDayForSource) {
+          firstIncompleteDaysBySource[sourceId] = firstIncompleteDayForSource;
         }
       });
       
-      // Use the earliest firstIncompleteDate across all sources
-      const allFirstIncompleteDates = Object.values(firstIncompleteDatesBySource);
-      if (allFirstIncompleteDates.length > 0) {
-        firstIncompleteDate = allFirstIncompleteDates.sort()[0]; // Earliest date
-        console.log(`📅 Using earliest first incomplete date across all sources: ${firstIncompleteDate}`);
+      // Use the earliest firstIncompleteDay across all sources
+      const allFirstIncompleteDays = Object.values(firstIncompleteDaysBySource);
+      if (allFirstIncompleteDays.length > 0) {
+        firstIncompleteDay = Math.min(...allFirstIncompleteDays);
+        console.log(`📅 Using earliest first incomplete day across all sources: Day ${firstIncompleteDay}`);
       } else {
-        console.log(`📅 No incomplete plans found, using today as fallback: ${firstIncompleteDate}`);
+        console.log(`📅 No incomplete plans found, using Day 1 as fallback: Day ${firstIncompleteDay}`);
       }
       
-      // CRITICAL: Calculate the most recent completed date for each source_plan_id
+      // CRITICAL: Calculate the most recent completed day_number for each source_plan_id
       // This is needed for resume calculation - frontend needs to know the last completed day
       // to resume at the next day (lastCompletedDay + 1)
       const mostRecentCompletedBySource = {};
       for (const plan of plans) {
         const sourceId = plan.source_plan_id?.toString();
-        if (!sourceId) continue;
-        
-        // Normalize date
-        let planDateStr;
-        if (plan.plan_date instanceof Date) {
-          const d = plan.plan_date;
-          planDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        } else if (typeof plan.plan_date === 'string') {
-          planDateStr = plan.plan_date.split('T')[0];
-        } else {
-          continue;
-        }
+        if (!sourceId || plan.day_number == null) continue;
         
         // Check if completed
         const isCompleted = plan.is_completed === true || plan.is_completed === 't' || plan.is_completed === 1;
@@ -417,20 +206,14 @@ exports.getDailyPlans = async (req, res, next) => {
         const isActuallyCompleted = isCompleted && hasCompletedAt;
         
         if (isActuallyCompleted) {
-          // Check if this is on/after assignment start_date
-          const assignmentStartDate = assignmentStartDates[sourceId];
-          if (assignmentStartDate && planDateStr < assignmentStartDate) {
-            continue; // Skip completed plans before start_date
-          }
-          
-          // Track the most recent completed date for this source
-          if (!mostRecentCompletedBySource[sourceId] || planDateStr > mostRecentCompletedBySource[sourceId]) {
-            mostRecentCompletedBySource[sourceId] = planDateStr;
+          // Track the most recent completed day_number for this source
+          if (!mostRecentCompletedBySource[sourceId] || plan.day_number > mostRecentCompletedBySource[sourceId]) {
+            mostRecentCompletedBySource[sourceId] = plan.day_number;
           }
         }
       }
       
-      console.log(`📅 Most recent completed dates by source:`, mostRecentCompletedBySource);
+      console.log(`📅 Most recent completed days by source:`, mostRecentCompletedBySource);
       
       plans = plans.filter(plan => {
         // CRITICAL: Skip stats records (double-check even though SQL should filter them)
@@ -439,9 +222,9 @@ exports.getDailyPlans = async (req, res, next) => {
           return false;
         }
         
-        // CRITICAL: Skip plans with null plan_date (stats records often have null plan_date)
-        if (!plan.plan_date || plan.plan_date === null) {
-          console.log(`  ⏭️ Skipping plan with null plan_date: plan_id=${plan.id}, plan_type=${plan.plan_type}, is_stats_record=${plan.is_stats_record}`);
+        // CRITICAL: Skip plans with null day_number
+        if (plan.day_number == null) {
+          console.log(`  ⏭️ Skipping plan with null day_number: plan_id=${plan.id}, plan_type=${plan.plan_type}, is_stats_record=${plan.is_stats_record}`);
           return false;
         }
         
@@ -452,101 +235,49 @@ exports.getDailyPlans = async (req, res, next) => {
           return false;
         }
         
-        // Handle plan_date - it might be a Date object or string
-        // CRITICAL: Use LOCAL date components to avoid timezone shifts
-        // When dates are stored as Date objects with timezone, toISOString() converts to UTC
-        // which can shift the date by one day (e.g., Dec 02 GMT+0500 becomes Dec 01 UTC)
-        let planDateStr;
-        if (plan.plan_date instanceof Date) {
-          // Use LOCAL date components, not UTC
-          const d = plan.plan_date;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          planDateStr = `${year}-${month}-${day}`;
-        } else if (typeof plan.plan_date === 'string') {
-          // Parse date string (YYYY-MM-DD format)
-          // Handle both YYYY-MM-DD and other formats
-          if (plan.plan_date.includes('T')) {
-            // If it has time component, extract just the date part
-            planDateStr = plan.plan_date.split('T')[0];
-          } else {
-            // For YYYY-MM-DD format, use as-is
-            planDateStr = plan.plan_date;
-          }
-        } else if (plan.plan_date === null || plan.plan_date === undefined) {
-          // If plan_date is null or invalid, skip this plan
-          console.warn(`⚠️ Invalid plan_date for plan: plan_id=${plan.id}, plan_date=${plan.plan_date}`);
-          return false;
-        } else {
-          console.warn(`⚠️ Unexpected plan_date type for plan: plan_id=${plan.id}, plan_date=${plan.plan_date}, type=${typeof plan.plan_date}`);
-          return false;
-        }
-        
-        // IMPORTANT: Only keep plans starting from the first incomplete day (or today)
-        // This ensures that after reload, Day 2 shows instead of Day 1 if Day 1 is completed
-        // Keep the plan if:
-        // 1. It's on or after the first incomplete date (or today if no incomplete plan found)
-        // 2. AND it's not a completed plan from before today (unless it's today itself)
         // CRITICAL: Handle is_completed properly (boolean true, string 't', or number 1)
         const isCompleted = plan.is_completed === true || plan.is_completed === 't' || plan.is_completed === 1;
         const hasCompletedAt = plan.completed_at != null && plan.completed_at !== 'null';
         const isActuallyCompleted = isCompleted && hasCompletedAt;
         
-        // CRITICAL: Also check against assignment start_date to filter out plans before start_date
-        const assignmentStartDate = assignmentStartDates[plan.source_plan_id?.toString()];
-        
-        // CRITICAL: ALWAYS exclude plans before assignment start_date, regardless of completion status
-        // This prevents completed plans on 2025-12-01 from being returned when assignment start_date is 2025-12-02
-        if (assignmentStartDate && planDateStr < assignmentStartDate) {
-          console.log(`🚫 FILTERING OUT: Plan ${plan.id} (${planDateStr}) is before assignment start_date (${assignmentStartDate}) - EXCLUDING`);
-          return false;
-        }
-        
-        const isOnOrAfterAssignmentStart = !assignmentStartDate || planDateStr >= assignmentStartDate;
-        const isToday = planDateStr === todayStr;
-        const isPastDate = planDateStr < todayStr;
-        const isFutureDate = planDateStr > todayStr;
-        
         // CRITICAL LOGIC: What plans should we show?
-        // 1. First incomplete plan and all future plans (incomplete or completed) - user needs to see what's next
-        // 2. Today's plan (completed or not) - user needs to see today's workout
-        // 3. The MOST RECENT completed past plan (for resume calculation - frontend needs to know last completed day)
-        // 4. DO NOT show other completed past plans (before today) - these are done and shouldn't clutter the list
-        // 5. DO NOT show plans before assignment start_date - already filtered above
+        // If include_completed=true: Show ALL plans (completed and incomplete)
+        // If include_completed=false: 
+        //   1. First incomplete plan and all future plans (incomplete or completed) - user needs to see what's next
+        //   2. The MOST RECENT completed plan (for resume calculation - frontend needs to know last completed day)
+        //   3. DO NOT show other completed past plans - these are done and shouldn't clutter the list
         
-        // Check if this plan is the first incomplete plan or after it
-        const isOnOrAfterFirstIncomplete = planDateStr >= firstIncompleteDate;
+        // Check if this plan is on or after the first incomplete day
+        const isOnOrAfterFirstIncomplete = plan.day_number >= firstIncompleteDay;
         
         const sourceId = plan.source_plan_id?.toString();
-        const mostRecentCompletedDate = mostRecentCompletedBySource[sourceId];
+        const mostRecentCompletedDay = mostRecentCompletedBySource[sourceId];
+        const isMostRecentCompleted = isActuallyCompleted && sourceId && mostRecentCompletedDay === plan.day_number;
         
+        // If include_completed=true, keep ALL plans
+        if (shouldIncludeCompleted) {
+            const completionStatus = isActuallyCompleted ? 'COMPLETED' : 'INCOMPLETE';
+          console.log(`✅ Keeping plan (include_completed=true): plan_id=${plan.id}, day_number=${plan.day_number}, status=${completionStatus}, is_completed=${plan.is_completed}, completed_at=${plan.completed_at ? 'has_value' : 'null'}`);
+          return true;
+        }
+        
+        // Otherwise, use the filtering logic for include_completed=false
         // Keep plan if:
-        // 1. It's on/after the first incomplete date (shows the next incomplete day and all future days)
-        // 2. OR it's today (so user can see today's plan even if completed)
-        // 3. AND it's on/after the assignment's start_date (already checked above)
-        // 4. AND it's NOT a completed past plan (EXCEPT the most recent one for resume calculation)
-        const isPastCompleted = isPastDate && isActuallyCompleted && planDateStr !== todayStr;
-        const isMostRecentCompleted = isPastCompleted && sourceId && mostRecentCompletedDate === planDateStr;
-        
-        // Keep the most recent completed past plan for resume calculation
-        const shouldKeep = isOnOrAfterAssignmentStart && 
-                          (isOnOrAfterFirstIncomplete || isToday || isMostRecentCompleted) && 
-                          !(isPastCompleted && !isMostRecentCompleted);
+        // 1. It's on/after the first incomplete day (shows the next incomplete day and all future days)
+        // 2. OR it's the most recent completed plan (for resume calculation)
+        const shouldKeep = isOnOrAfterFirstIncomplete || isMostRecentCompleted;
         
         if (!shouldKeep) {
-          if (assignmentStartDate && planDateStr < assignmentStartDate) {
-            console.log(`⏭️ Filtering out plan ${plan.id} (${planDateStr}) - before assignment start_date (${assignmentStartDate})`);
-          } else if (isPastCompleted) {
-            console.log(`🚫 CRITICAL: Filtering out completed PAST plan ${plan.id} (${planDateStr}) - is_completed=${plan.is_completed}, completed_at=${plan.completed_at ? 'has_value' : 'null'}, today=${todayStr}`);
-          } else if (!isOnOrAfterFirstIncomplete && !isToday) {
-            console.log(`⏭️ Filtering out plan ${plan.id} (${planDateStr}) - before firstIncompleteDate (${firstIncompleteDate}) and not today`);
+          if (isActuallyCompleted && !isMostRecentCompleted) {
+            console.log(`🚫 CRITICAL: Filtering out completed plan ${plan.id} (Day ${plan.day_number}) - is_completed=${plan.is_completed}, completed_at=${plan.completed_at ? 'has_value' : 'null'}`);
+          } else if (!isOnOrAfterFirstIncomplete) {
+            console.log(`⏭️ Filtering out plan ${plan.id} (Day ${plan.day_number}) - before firstIncompleteDay (Day ${firstIncompleteDay})`);
           }
         } else {
-          if (isActuallyCompleted && !isPastDate) {
-            console.log(`✅ Keeping completed plan (today/future): plan_id=${plan.id}, plan_date=${planDateStr}, today=${todayStr}`);
+          if (isActuallyCompleted) {
+            console.log(`✅ Keeping completed plan: plan_id=${plan.id}, day_number=${plan.day_number}, isMostRecent=${isMostRecentCompleted}`);
           } else {
-            console.log(`✅ Keeping incomplete plan: plan_id=${plan.id}, plan_date=${planDateStr}, is_completed=${plan.is_completed}`);
+            console.log(`✅ Keeping incomplete plan: plan_id=${plan.id}, day_number=${plan.day_number}, is_completed=${plan.is_completed}`);
           }
         }
         
@@ -555,46 +286,17 @@ exports.getDailyPlans = async (req, res, next) => {
       
       console.log(`📊 getDailyPlans - After filtering: ${plans.length} plans remaining`);
       plans.forEach(plan => {
-        console.log(`  ✅ Final plan: plan_id=${plan.id}, plan_date=${plan.plan_date}, is_completed=${plan.is_completed}`);
+        console.log(`  ✅ Final plan: plan_id=${plan.id}, day_number=${plan.day_number}, is_completed=${plan.is_completed}`);
       });
       
       // CRITICAL: Sort plans based on include_completed parameter
-      // If include_completed=true: Sort by date only (chronological order)
-      // If include_completed=false or not provided: Prioritize incomplete plans first, then by date ASC
+      // If include_completed=true: Sort by day_number only (chronological order)
+      // If include_completed=false or not provided: Prioritize incomplete plans first, then by day_number ASC
       // This ensures the mobile app gets the correct order based on what it requests
-      // CRITICAL: Use LOCAL date components to avoid timezone shifts
       plans.sort((a, b) => {
-        // Normalize dates for comparison
-        let dateA, dateB;
-        if (a.plan_date instanceof Date) {
-          // Use LOCAL date components, not UTC
-          const d = a.plan_date;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          dateA = `${year}-${month}-${day}`;
-        } else if (typeof a.plan_date === 'string') {
-          dateA = a.plan_date.split('T')[0];
-        } else {
-          dateA = '';
-        }
-        
-        if (b.plan_date instanceof Date) {
-          // Use LOCAL date components, not UTC
-          const d = b.plan_date;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          dateB = `${year}-${month}-${day}`;
-        } else if (typeof b.plan_date === 'string') {
-          dateB = b.plan_date.split('T')[0];
-        } else {
-          dateB = '';
-        }
-        
-        // If include_completed=true, sort by date only (chronological order)
+        // If include_completed=true, sort by day_number only (chronological order)
         if (shouldIncludeCompleted) {
-          return dateA.localeCompare(dateB);
+          return (a.day_number || 0) - (b.day_number || 0);
         }
         
         // Otherwise, prioritize incomplete plans over completed plans
@@ -614,37 +316,24 @@ exports.getDailyPlans = async (req, res, next) => {
           return -1; // a (incomplete) comes before b (completed)
         }
         
-        // Both are same completion status, sort by date ASC
-        return dateA.localeCompare(dateB);
+        // Both are same completion status, sort by day_number ASC
+        return (a.day_number || 0) - (b.day_number || 0);
       });
       
-      console.log(`📊 getDailyPlans - After sorting: First plan is ${plans[0]?.id} (date: ${plans[0]?.plan_date}, completed: ${plans[0]?.is_completed})`);
+      console.log(`📊 getDailyPlans - After sorting: First plan is ${plans[0]?.id} (day_number: ${plans[0]?.day_number}, completed: ${plans[0]?.is_completed})`);
       
-      // FINAL SAFETY CHECK: Remove ALL completed plans except today's (unless include_completed=true)
+      // FINAL SAFETY CHECK: Remove ALL completed plans except the most recent one (unless include_completed=true)
       // This is a critical safeguard to ensure we NEVER return a completed plan as the first result
-      // (unless it's today, so the user can see what they just completed, or include_completed=true)
-      // Use existing todayStr from earlier in the function
+      // (unless it's the most recent completed plan for resume calculation, or include_completed=true)
       
       const plansBeforeFilter = plans.length;
       
       if (!shouldIncludeCompleted) {
-        // Filter out completed past plans (keep today's completed plan AND most recent completed for resume)
+        // Filter out completed plans (keep most recent completed for resume)
         plans = plans.filter(plan => {
-          let planDateStr;
-          if (plan.plan_date instanceof Date) {
-            const d = plan.plan_date;
-            const year = d.getFullYear();
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            planDateStr = `${year}-${month}-${day}`;
-          } else if (typeof plan.plan_date === 'string') {
-            planDateStr = plan.plan_date.split('T')[0];
-          } else {
-            return false; // Skip plans with invalid dates
-          }
+          if (plan.day_number == null) return false;
           
           // CRITICAL: Use the same robust completion check as above
-          // PostgreSQL can return 't'/'f' as strings, or true/false as booleans
           const isCompleted = plan.is_completed === true || 
                               plan.is_completed === 't' || 
                               plan.is_completed === 1 || 
@@ -654,30 +343,22 @@ exports.getDailyPlans = async (req, res, next) => {
                                  plan.completed_at !== 'null' && 
                                  plan.completed_at !== '' &&
                                  String(plan.completed_at).trim() !== '';
-          // A plan is considered completed ONLY if BOTH is_completed is true AND completed_at exists
           const isActuallyCompleted = isCompleted && hasCompletedAt;
-          const isToday = planDateStr === todayStr;
-          const isPastDate = planDateStr < todayStr;
           
           const sourceId = plan.source_plan_id?.toString();
-          const mostRecentCompletedDate = mostRecentCompletedBySource[sourceId];
-          const isMostRecentCompleted = isPastDate && isActuallyCompleted && sourceId && mostRecentCompletedDate === planDateStr;
+          const mostRecentCompletedDay = mostRecentCompletedBySource[sourceId];
+          const isMostRecentCompleted = isActuallyCompleted && sourceId && mostRecentCompletedDay === plan.day_number;
           
           // Keep plan if:
           // 1. It's not completed, OR
-          // 2. It's completed but it's today (so user can see what they just completed), OR
-          // 3. It's the most recent completed past plan (for resume calculation)
-          const shouldKeep = !isActuallyCompleted || isToday || isMostRecentCompleted;
+          // 2. It's the most recent completed plan (for resume calculation)
+          const shouldKeep = !isActuallyCompleted || isMostRecentCompleted;
           
           // Enhanced logging for debugging
-          if (isActuallyCompleted && !isToday && !isMostRecentCompleted) {
-            console.log(`🚫 FINAL FILTER: Plan ${plan.id} (${planDateStr}) is completed (is_completed=${plan.is_completed}, completed_at=${plan.completed_at}) and not today and not most recent - REMOVING`);
+          if (isActuallyCompleted && !isMostRecentCompleted) {
+            console.log(`🚫 FINAL FILTER: Plan ${plan.id} (Day ${plan.day_number}) is completed (is_completed=${plan.is_completed}, completed_at=${plan.completed_at}) and not most recent - REMOVING`);
           } else if (isMostRecentCompleted) {
-            console.log(`✅ FINAL FILTER: Keeping most recent completed plan ${plan.id} (${planDateStr}) for resume calculation`);
-          }
-          
-          if (!shouldKeep && isActuallyCompleted) {
-            return false; // Explicitly return false for completed past plans (except most recent)
+            console.log(`✅ FINAL FILTER: Keeping most recent completed plan ${plan.id} (Day ${plan.day_number}) for resume calculation`);
           }
           
           return shouldKeep;
@@ -688,44 +369,34 @@ exports.getDailyPlans = async (req, res, next) => {
         console.log(`📊 getDailyPlans - include_completed=true, keeping all plans including completed ones`);
       }
       
-      // CRITICAL: Aggressively remove ALL completed plans from the beginning (except today's and most recent, unless include_completed=true)
+      // CRITICAL: Aggressively remove ALL completed plans from the beginning (except most recent, unless include_completed=true)
       // This is a double-check to ensure we NEVER return a completed plan as the first result
-      // Keep removing completed plans until we find the first incomplete plan (or today's completed plan, or most recent completed)
+      // Keep removing completed plans until we find the first incomplete plan (or most recent completed)
       // BUT: Skip this if include_completed=true (frontend wants to see all plans including completed ones)
       if (!shouldIncludeCompleted) {
         let removedCount = 0;
         while (plans.length > 0) {
         const firstPlan = plans[0];
-        let firstPlanDateStr;
-        if (firstPlan.plan_date instanceof Date) {
-          const d = firstPlan.plan_date;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          firstPlanDateStr = `${year}-${month}-${day}`;
-        } else if (typeof firstPlan.plan_date === 'string') {
-          firstPlanDateStr = firstPlan.plan_date.split('T')[0];
-        } else {
-          break; // Invalid date, stop
+          if (firstPlan.day_number == null) {
+            plans.shift();
+            continue;
         }
         
         const isFirstCompleted = firstPlan.is_completed === true || firstPlan.is_completed === 't' || firstPlan.is_completed === 1;
         const hasFirstCompletedAt = firstPlan.completed_at != null && firstPlan.completed_at !== 'null' && firstPlan.completed_at !== '';
         const isFirstActuallyCompleted = isFirstCompleted && hasFirstCompletedAt;
-        const isFirstToday = firstPlanDateStr === todayStr;
-        const isFirstPastDate = firstPlanDateStr < todayStr;
         
         const firstSourceId = firstPlan.source_plan_id?.toString();
-        const firstMostRecentCompletedDate = mostRecentCompletedBySource[firstSourceId];
-        const isFirstMostRecentCompleted = isFirstPastDate && isFirstActuallyCompleted && firstSourceId && firstMostRecentCompletedDate === firstPlanDateStr;
-        
-        // Remove if it's completed AND not today AND not the most recent completed (for resume)
-        if (isFirstActuallyCompleted && !isFirstToday && !isFirstMostRecentCompleted) {
-          console.log(`🚫 AGGRESSIVE REMOVAL: Removing completed plan ${firstPlan.id} (${firstPlanDateStr}) from beginning - is_completed=${firstPlan.is_completed}, completed_at=${firstPlan.completed_at}`);
+          const firstMostRecentCompletedDay = mostRecentCompletedBySource[firstSourceId];
+          const isFirstMostRecentCompleted = isFirstActuallyCompleted && firstSourceId && firstMostRecentCompletedDay === firstPlan.day_number;
+          
+          // Remove if it's completed AND not the most recent completed (for resume)
+          if (isFirstActuallyCompleted && !isFirstMostRecentCompleted) {
+            console.log(`🚫 AGGRESSIVE REMOVAL: Removing completed plan ${firstPlan.id} (Day ${firstPlan.day_number}) from beginning - is_completed=${firstPlan.is_completed}, completed_at=${firstPlan.completed_at}`);
           plans.shift();
           removedCount++;
         } else {
-          // Found an incomplete plan, today's plan, or most recent completed plan, stop removing
+            // Found an incomplete plan or most recent completed plan, stop removing
           break;
         }
       }
@@ -733,84 +404,33 @@ exports.getDailyPlans = async (req, res, next) => {
         if (removedCount > 0) {
           console.log(`📊 Removed ${removedCount} additional completed plan(s) from the beginning. Remaining plans: ${plans.length}`);
           if (plans.length > 0) {
-            console.log(`  ✅ New first plan: plan_id=${plans[0].id}, plan_date=${plans[0].plan_date}, is_completed=${plans[0].is_completed}`);
+            console.log(`  ✅ New first plan: plan_id=${plans[0].id}, day_number=${plans[0].day_number}, is_completed=${plans[0].is_completed}`);
           } else {
             console.warn(`⚠️ WARNING: All plans were completed and removed! This should not happen.`);
           }
         }
       }
       
-      // Final verification: Ensure first plan is incomplete (unless it's today)
+      // Final verification: Ensure first plan is incomplete (unless it's the most recent completed)
       if (plans.length > 0) {
         const finalFirstPlan = plans[0];
-        let finalFirstPlanDateStr;
-        if (finalFirstPlan.plan_date instanceof Date) {
-          const d = finalFirstPlan.plan_date;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          finalFirstPlanDateStr = `${year}-${month}-${day}`;
-        } else if (typeof finalFirstPlan.plan_date === 'string') {
-          finalFirstPlanDateStr = finalFirstPlan.plan_date.split('T')[0];
-        } else {
-          finalFirstPlanDateStr = '';
-        }
-        
         const isFinalCompleted = finalFirstPlan.is_completed === true || finalFirstPlan.is_completed === 't' || finalFirstPlan.is_completed === 1;
         const hasFinalCompletedAt = finalFirstPlan.completed_at != null && finalFirstPlan.completed_at !== 'null' && finalFirstPlan.completed_at !== '';
         const isFinalActuallyCompleted = isFinalCompleted && hasFinalCompletedAt;
-        const isFinalToday = finalFirstPlanDateStr === todayStr;
         
-        if (isFinalActuallyCompleted && !isFinalToday) {
-          console.error(`❌ CRITICAL BUG: First plan ${finalFirstPlan.id} (${finalFirstPlanDateStr}) is STILL completed after all filtering! This should never happen.`);
+        const finalSourceId = finalFirstPlan.source_plan_id?.toString();
+        const finalMostRecentCompletedDay = mostRecentCompletedBySource[finalSourceId];
+        const isFinalMostRecentCompleted = isFinalActuallyCompleted && finalSourceId && finalMostRecentCompletedDay === finalFirstPlan.day_number;
+        
+        if (isFinalActuallyCompleted && !isFinalMostRecentCompleted) {
+          console.error(`❌ CRITICAL BUG: First plan ${finalFirstPlan.id} (Day ${finalFirstPlan.day_number}) is STILL completed after all filtering! This should never happen.`);
           // Last resort: Remove it
           plans.shift();
           console.log(`🚫 Removed the completed first plan as last resort. Remaining: ${plans.length} plans`);
         }
       }
       
-      console.log(`✅ FINAL RESULT: First plan is ${plans[0] ? (plans[0].is_completed === true || plans[0].is_completed === 't' ? 'completed' : 'incomplete') : 'NONE'} (correct): plan_id=${plans[0]?.id}, plan_date=${plans[0]?.plan_date}, is_completed=${plans[0]?.is_completed}`);
-      // Keep removing completed plans from the front until we find an incomplete one
-      while (plans.length > 0) {
-        const firstPlan = plans[0];
-        let firstPlanDateStr;
-        if (firstPlan.plan_date instanceof Date) {
-          const d = firstPlan.plan_date;
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          firstPlanDateStr = `${year}-${month}-${day}`;
-        } else if (typeof firstPlan.plan_date === 'string') {
-          firstPlanDateStr = firstPlan.plan_date.split('T')[0];
-        } else {
-          // Invalid date, remove it
-          plans = plans.filter(p => p.id !== firstPlan.id);
-          continue;
-        }
-        
-        // CRITICAL: Use the same robust completion check
-        const isFirstCompleted = firstPlan.is_completed === true || 
-                                 firstPlan.is_completed === 't' || 
-                                 firstPlan.is_completed === 1 || 
-                                 firstPlan.is_completed === 'true' ||
-                                 String(firstPlan.is_completed).toLowerCase() === 'true';
-        const hasFirstCompletedAt = firstPlan.completed_at != null && 
-                                    firstPlan.completed_at !== 'null' && 
-                                    firstPlan.completed_at !== '' &&
-                                    String(firstPlan.completed_at).trim() !== '';
-        const isFirstActuallyCompleted = isFirstCompleted && hasFirstCompletedAt;
-        const isFirstToday = firstPlanDateStr === todayStr;
-        
-        // If first plan is completed and not today, remove it and continue loop
-        if (isFirstActuallyCompleted && !isFirstToday) {
-          console.error(`❌ CRITICAL ERROR: First plan ${firstPlan.id} (${firstPlanDateStr}) is completed but not today. Removing it and checking next plan.`);
-          plans = plans.filter(p => p.id !== firstPlan.id);
-          continue;
-        }
-        
-        // First plan is either incomplete or today's completed plan - this is valid
-        break;
-      }
+      console.log(`✅ FINAL RESULT: First plan is ${plans[0] ? (plans[0].is_completed === true || plans[0].is_completed === 't' ? 'completed' : 'incomplete') : 'NONE'} (correct): plan_id=${plans[0]?.id}, day_number=${plans[0]?.day_number}, is_completed=${plans[0]?.is_completed}`);
       
       // Log the first plan that will be returned
       if (plans.length > 0) {
@@ -820,22 +440,17 @@ exports.getDailyPlans = async (req, res, next) => {
         const isFirstActuallyCompleted = isFirstCompleted && hasFirstCompletedAt;
         
         if (isFirstActuallyCompleted) {
-          let firstPlanDateStr;
-          if (finalFirstPlan.plan_date instanceof Date) {
-            const d = finalFirstPlan.plan_date;
-            firstPlanDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          } else if (typeof finalFirstPlan.plan_date === 'string') {
-            firstPlanDateStr = finalFirstPlan.plan_date.split('T')[0];
-          }
-          const isFirstToday = firstPlanDateStr === todayStr;
+          const finalSourceId = finalFirstPlan.source_plan_id?.toString();
+          const finalMostRecentCompletedDay = mostRecentCompletedBySource[finalSourceId];
+          const isFirstMostRecentCompleted = isFirstActuallyCompleted && finalSourceId && finalMostRecentCompletedDay === finalFirstPlan.day_number;
           
-          if (isFirstToday) {
-            console.log(`✅ FINAL RESULT: First plan is today's completed plan (valid): plan_id=${finalFirstPlan.id}, plan_date=${finalFirstPlan.plan_date}`);
+          if (isFirstMostRecentCompleted) {
+            console.log(`✅ FINAL RESULT: First plan is most recent completed plan (valid for resume): plan_id=${finalFirstPlan.id}, day_number=${finalFirstPlan.day_number}`);
           } else {
-            console.error(`❌ CRITICAL: First plan is completed but not today! This should never happen after filtering. plan_id=${finalFirstPlan.id}, plan_date=${finalFirstPlan.plan_date}`);
+            console.error(`❌ CRITICAL: First plan is completed but not most recent! This should never happen after filtering. plan_id=${finalFirstPlan.id}, day_number=${finalFirstPlan.day_number}`);
           }
         } else {
-          console.log(`✅ FINAL RESULT: First plan is incomplete (correct): plan_id=${finalFirstPlan.id}, plan_date=${finalFirstPlan.plan_date}, is_completed=${finalFirstPlan.is_completed}`);
+          console.log(`✅ FINAL RESULT: First plan is incomplete (correct): plan_id=${finalFirstPlan.id}, day_number=${finalFirstPlan.day_number}, is_completed=${finalFirstPlan.is_completed}`);
         }
       } else {
         console.warn(`⚠️ WARNING: No plans remaining after filtering! This might indicate all plans are completed or filtered out.`);
@@ -853,14 +468,14 @@ exports.getDailyPlans = async (req, res, next) => {
             is_completed: true
           })
           .whereNotNull('completed_at')
-          .whereNotNull('plan_date')
+          .whereNotNull('day_number')
           .whereIn('plan_type', ['web_assigned', 'web_assigne'])
           .modify((qb) => {
             if (gym_id != null) {
               qb.andWhere({ gym_id: gym_id });
             }
           })
-          .orderBy('plan_date', 'desc')
+          .orderBy('day_number', 'desc')
           .limit(10);
         
         if (lastCompletedPlans.length > 0) {
@@ -893,42 +508,29 @@ exports.getDailyPlans = async (req, res, next) => {
                 }
                 
                 if (Array.isArray(dailyPlans) && dailyPlans.length > 0) {
-                  // Find which day was last completed
-                  const lastPlanDate = new Date(lastPlan.plan_date);
-                  lastPlanDate.setHours(0, 0, 0, 0);
-                  const lastPlanDateStr = lastPlanDate.toISOString().split('T')[0];
+                  // Find which day was last completed (use day_number directly)
+                  const completedDayNumber = lastPlan.day_number || 0;
                   
-                  // Calculate assignment start date
-                  let startDateStr;
-                  if (assignment.start_date instanceof Date) {
-                    const d = assignment.start_date;
-                    startDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                  } else {
-                    startDateStr = assignment.start_date.split('T')[0];
-                  }
-                  
-                  // Calculate which day number was completed (Day 1, Day 2, etc.)
-                  const startDate = new Date(startDateStr);
-                  const daysDiff = Math.floor((lastPlanDate - startDate) / (1000 * 60 * 60 * 24));
-                  const completedDayNumber = daysDiff + 1; // Day 1 = offset 0, Day 2 = offset 1, etc.
+                  console.log(`📅 On-the-fly generation (no plans): completedDayNumber=${completedDayNumber}`);
                   
                   // Check if next day exists in daily_plans
-                  const nextDayIndex = completedDayNumber; // Next day is at index = completedDayNumber (0-indexed)
+                  // dailyPlans array is 0-indexed, day_number is 1-indexed
+                  // Day 1 → index 0, Day 2 → index 1, etc.
+                  const nextDayIndex = completedDayNumber; // Next day index
                   
                   if (nextDayIndex < dailyPlans.length) {
                     const nextDayPlan = dailyPlans[nextDayIndex];
                     
-                    // Check if next day already exists in database
-                    const nextDayDate = new Date(startDate);
-                    nextDayDate.setDate(startDate.getDate() + completedDayNumber);
-                    const nextDayDateStr = nextDayDate.toISOString().split('T')[0];
+                    const targetDayNumber = completedDayNumber + 1;
+                    
+                    console.log(`📅 On-the-fly generation (no plans): Next day will be Day ${targetDayNumber} at index ${nextDayIndex}`);
                     
                     const existingNextDay = await db('daily_training_plans')
                       .where({
                         user_id: requestingUserId,
-                        plan_date: nextDayDateStr,
                         source_plan_id: assignment.id.toString(),
-                        is_stats_record: false
+                        is_stats_record: false,
+                        day_number: targetDayNumber
                       })
                       .modify((qb) => {
                         if (gym_id != null) {
@@ -945,7 +547,7 @@ exports.getDailyPlans = async (req, res, next) => {
                         id: null, // Not stored in DB yet
                         user_id: requestingUserId,
                         gym_id: gym_id,
-                        plan_date: nextDayDateStr,
+                        day_number: targetDayNumber,
                         plan_type: 'web_assigned',
                         source_plan_id: assignment.id.toString(),
                         plan_category: assignment.category || 'General',
@@ -962,7 +564,7 @@ exports.getDailyPlans = async (req, res, next) => {
                       };
                       
                       plans.push(generatedPlan);
-                      console.log(`✅ Generated next day (Day ${completedDayNumber + 1}) on-the-fly for assignment ${assignment.id} - date: ${nextDayDateStr} (NOT stored in DB yet)`);
+                      console.log(`✅ Generated next day (Day ${targetDayNumber}) on-the-fly for assignment ${assignment.id} (NOT stored in DB yet)`);
                       break; // Only generate for the first assignment that needs it
                     }
                   }
@@ -985,13 +587,13 @@ exports.getDailyPlans = async (req, res, next) => {
           
           if (isActuallyCompleted && plan.source_plan_id) {
             const sourceId = plan.source_plan_id.toString();
-            // Keep the most recent completed plan for each source (by plan_date)
+            // Keep the most recent completed plan for each source (by day_number)
             if (!completedPlansBySource[sourceId]) {
               completedPlansBySource[sourceId] = plan;
             } else {
-              const existingDate = new Date(completedPlansBySource[sourceId].plan_date);
-              const currentDate = new Date(plan.plan_date);
-              if (currentDate > existingDate) {
+              const existingDay = Number(completedPlansBySource[sourceId].day_number || 0);
+              const currentDay = Number(plan.day_number || 0);
+              if (currentDay > existingDay) {
                 completedPlansBySource[sourceId] = plan;
               }
             }
@@ -1019,39 +621,34 @@ exports.getDailyPlans = async (req, res, next) => {
               }
               
               if (Array.isArray(dailyPlans) && dailyPlans.length > 0) {
-                // Calculate which day was completed
-                let startDateStr;
-                if (assignment.start_date instanceof Date) {
-                  const d = assignment.start_date;
-                  startDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                } else {
-                  startDateStr = assignment.start_date.split('T')[0];
+                // Use day_number directly from completed plan (no date calculation needed)
+                const completedDayNumber = completedPlan.day_number != null ? Number(completedPlan.day_number) : null;
+                
+                if (completedDayNumber == null || completedDayNumber < 1) {
+                  console.warn(`⚠️ On-the-fly generation: completedPlan has invalid day_number (${completedPlan.day_number}), skipping`);
+                  continue;
                 }
                 
-                const startDate = new Date(startDateStr + 'T00:00:00.000Z');
-                const completedPlanDate = new Date(completedPlan.plan_date);
-                completedPlanDate.setHours(0, 0, 0, 0);
-                const daysDiff = Math.floor((completedPlanDate - startDate) / (1000 * 60 * 60 * 24));
-                const completedDayNumber = daysDiff; // Day 1 = offset 0
+                console.log(`📅 On-the-fly generation: completedDayNumber=${completedDayNumber}`);
                 
                 // Check if next day exists in daily_plans
-                const nextDayIndex = completedDayNumber + 1; // Next day index
+                // day_number is 1-indexed (Day 1, Day 2, etc.), array index is 0-indexed
+                const nextDayIndex = completedDayNumber; // Day 1 → index 0, Day 2 → index 1, etc.
+                
+                // day_number is 1-indexed, so next day is completedDayNumber + 1
+                const targetDayNumber = completedDayNumber + 1;
                 
                 if (nextDayIndex < dailyPlans.length) {
                   const nextDayPlan = dailyPlans[nextDayIndex];
                   
-                  // Calculate next day date
-                  const nextDayDate = new Date(startDate);
-                  nextDayDate.setDate(startDate.getDate() + completedDayNumber + 1);
-                  const nextDayDateStr = nextDayDate.toISOString().split('T')[0];
+                  console.log(`📅 On-the-fly generation: Next day will be Day ${targetDayNumber} at index ${nextDayIndex}`);
                   
-                  // Check if next day already exists in database
                   const existingNextDay = await db('daily_training_plans')
                     .where({
                       user_id: requestingUserId,
-                      plan_date: nextDayDateStr,
                       source_plan_id: assignment.id.toString(),
-                      is_stats_record: false
+                      is_stats_record: false,
+                      day_number: targetDayNumber
                     })
                     .modify((qb) => {
                       if (gym_id != null) {
@@ -1068,7 +665,7 @@ exports.getDailyPlans = async (req, res, next) => {
                       id: null, // Not stored in DB yet
                       user_id: requestingUserId,
                       gym_id: gym_id,
-                      plan_date: nextDayDateStr,
+                      day_number: targetDayNumber,
                       plan_type: 'web_assigned',
                       source_plan_id: assignment.id.toString(),
                       plan_category: assignment.category || 'General',
@@ -1081,61 +678,25 @@ exports.getDailyPlans = async (req, res, next) => {
                       updated_at: new Date(),
                       // Mark as generated (not stored)
                       _is_generated: true,
-                      _day_number: completedDayNumber + 2
+                      _day_number: targetDayNumber
                     };
                     
                     // Insert the generated plan
                     plans.push(generatedPlan);
                     
-                    // Re-sort plans to ensure correct order (by date if include_completed=true, or by completion status then date)
+                    // Re-sort plans to ensure correct order (by day_number; incomplete first when include_completed=false)
                     plans.sort((a, b) => {
-                      // Normalize dates for comparison
-                      let dateA, dateB;
-                      if (a.plan_date instanceof Date) {
-                        const d = a.plan_date;
-                        dateA = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                      } else if (typeof a.plan_date === 'string') {
-                        dateA = a.plan_date.split('T')[0];
-                      } else {
-                        dateA = '';
+                      const aCompleted = a.is_completed === true || a.is_completed === 't' || a.is_completed === 1;
+                      const bCompleted = b.is_completed === true || b.is_completed === 't' || b.is_completed === 1;
+                      
+                      if (!shouldIncludeCompleted && aCompleted !== bCompleted) {
+                        return aCompleted ? 1 : -1; // Incomplete first
                       }
                       
-                      if (b.plan_date instanceof Date) {
-                        const d = b.plan_date;
-                        dateB = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                      } else if (typeof b.plan_date === 'string') {
-                        dateB = b.plan_date.split('T')[0];
-                      } else {
-                        dateB = '';
-                      }
-                      
-                      // If include_completed=true, sort by date only (chronological order)
-                      if (shouldIncludeCompleted) {
-                        return dateA.localeCompare(dateB);
-                      }
-                      
-                      // Otherwise, prioritize incomplete plans over completed plans
-                      const aIsCompleted = a.is_completed === true || a.is_completed === 't' || a.is_completed === 1;
-                      const aHasCompletedAt = a.completed_at != null && a.completed_at !== 'null' && a.completed_at !== '';
-                      const aIsActuallyCompleted = aIsCompleted && aHasCompletedAt;
-                      
-                      const bIsCompleted = b.is_completed === true || b.is_completed === 't' || b.is_completed === 1;
-                      const bHasCompletedAt = b.completed_at != null && b.completed_at !== 'null' && b.completed_at !== '';
-                      const bIsActuallyCompleted = bIsCompleted && bHasCompletedAt;
-                      
-                      // If one is incomplete and the other is completed, incomplete comes first
-                      if (aIsActuallyCompleted && !bIsActuallyCompleted) {
-                        return 1; // a (completed) comes after b (incomplete)
-                      }
-                      if (!aIsActuallyCompleted && bIsActuallyCompleted) {
-                        return -1; // a (incomplete) comes before b (completed)
-                      }
-                      
-                      // Both are same completion status, sort by date ASC
-                      return dateA.localeCompare(dateB);
+                      return (Number(a.day_number) || 0) - (Number(b.day_number) || 0);
                     });
                     
-                    console.log(`✅ Generated next day (Day ${completedDayNumber + 2}) on-the-fly for assignment ${assignment.id} - date: ${nextDayDateStr} (NOT stored in DB yet)`);
+                    console.log(`✅ Generated next day (Day ${targetDayNumber}) on-the-fly for assignment ${assignment.id} (NOT stored in DB yet)`);
                     break; // Only generate for the first assignment that needs it
                   }
                 }
@@ -1332,7 +893,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       .where({ user_id: user_id, is_stats_record: false })
       .whereNotNull('completed_at')
       .where('completed_at', '>', new Date(Date.now() - 10000).toISOString()) // Last 10 seconds
-      .select('id', 'plan_date', 'completed_at', 'source_plan_id')
+      .select('id', 'day_number', 'completed_at', 'source_plan_id')
       .orderBy('completed_at', 'desc')
       .limit(10);
     
@@ -1340,7 +901,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       console.log(`⚠️ WARNING: Found ${recentCompletions.length} recent completion(s) in the last 10 seconds for user ${user_id}:`, 
         recentCompletions.map(p => ({
           id: p.id,
-          plan_date: p.plan_date,
+          day_number: p.day_number,
           source_plan_id: p.source_plan_id,
           completed_at: p.completed_at
         }))
@@ -1411,12 +972,12 @@ exports.submitDailyCompletion = async (req, res, next) => {
         });
       }
       
-      // Plan doesn't exist - try to create it from assignment if we have source_plan_id and plan_date
+      // Plan doesn't exist - try to create it from assignment if we have source_plan_id and day_number
       // The frontend should send these in the request body for generated plans
-      const { source_plan_id, plan_date } = req.body;
+      const { source_plan_id, day_number } = req.body;
       
-      if (source_plan_id && plan_date) {
-        console.log(`🔄 Attempting to create missing plan from assignment ${source_plan_id} for date ${plan_date} (user is completing workouts)`);
+      if (source_plan_id && day_number) {
+        console.log(`🔄 Attempting to create missing plan from assignment ${source_plan_id} for day_number ${day_number} (user is completing workouts)`);
         
         try {
           // Find the assignment
@@ -1437,19 +998,13 @@ exports.submitDailyCompletion = async (req, res, next) => {
             }
             
             if (Array.isArray(dailyPlans) && dailyPlans.length > 0) {
-              // Calculate which day this is
-              let startDateStr;
-              if (assignment.start_date instanceof Date) {
-                const d = assignment.start_date;
-                startDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-              } else {
-                startDateStr = assignment.start_date.split('T')[0];
+              const targetDayNumber = Number(day_number);
+              if (!Number.isInteger(targetDayNumber) || targetDayNumber < 1) {
+                return res.status(400).json({
+                  success: false,
+                  message: 'Invalid day_number provided'
+                });
               }
-              
-              const startDate = new Date(startDateStr);
-              const targetDate = new Date(plan_date);
-              const daysDiff = Math.floor((targetDate - startDate) / (1000 * 60 * 60 * 24));
-              const dayNumber = daysDiff + 1; // Day 1 = offset 0
               
               // CRITICAL: Verify this is the next sequential day after the last completed day
               // This prevents creating Day 3 when Day 1 is completed (should only create Day 2)
@@ -1465,36 +1020,31 @@ exports.submitDailyCompletion = async (req, res, next) => {
                     .orWhere('is_completed', 1);
                 })
                 .whereNotNull('completed_at')
-                .orderBy('plan_date', 'desc')
+                .orderBy('day_number', 'desc')
                 .first();
               
               if (lastCompletedPlan) {
-                const lastCompletedDate = new Date(lastCompletedPlan.plan_date);
-                lastCompletedDate.setHours(0, 0, 0, 0);
-                const targetDateNormalized = new Date(plan_date);
-                targetDateNormalized.setHours(0, 0, 0, 0);
-                const daysDifference = Math.floor((targetDateNormalized - lastCompletedDate) / (1000 * 60 * 60 * 24));
-                
-                if (daysDifference !== 1) {
-                  console.error(`❌ Cannot create plan: Requested date ${plan_date} is not the next sequential day after last completed day ${lastCompletedPlan.plan_date}. Days difference: ${daysDifference}`);
+                const lastCompletedDay = Number(lastCompletedPlan.day_number || 0);
+                if (targetDayNumber !== lastCompletedDay + 1) {
+                  console.error(`❌ Cannot create plan: Requested day ${targetDayNumber} is not the next sequential day after last completed day ${lastCompletedDay}.`);
                   return res.status(400).json({
                     success: false,
-                    message: `Cannot create plan: You must complete days in order. The last completed day is ${lastCompletedPlan.plan_date}, but you're trying to complete ${plan_date}.`
+                    message: `Cannot create plan: You must complete days in order. The last completed day is ${lastCompletedDay}, but you're trying to complete Day ${targetDayNumber}.`
                   });
                 }
               } else {
                 // No completed plans yet - this should be Day 1
-                if (dayNumber !== 1) {
-                  console.error(`❌ Cannot create plan: No completed plans found, but requested day is ${dayNumber} (should be Day 1)`);
+                if (targetDayNumber !== 1) {
+                  console.error(`❌ Cannot create plan: No completed plans found, but requested day is ${targetDayNumber} (should be Day 1)`);
                   return res.status(400).json({
                     success: false,
-                    message: `Cannot create plan: This should be Day 1, but requested day is ${dayNumber}.`
+                    message: `Cannot create plan: This should be Day 1, but requested day is ${targetDayNumber}.`
                   });
                 }
               }
               
-              if (dayNumber > 0 && dayNumber <= dailyPlans.length) {
-                const dayPlan = dailyPlans[dayNumber - 1]; // 0-indexed
+              if (targetDayNumber > 0 && targetDayNumber <= dailyPlans.length) {
+                const dayPlan = dailyPlans[targetDayNumber - 1]; // 0-indexed
                 const dayWorkouts = dayPlan.workouts || dayPlan.exercises || [];
                 
                 // Create the plan in the database
@@ -1502,7 +1052,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
                   .insert({
                     user_id: user_id,
                     gym_id: gym_id,
-                    plan_date: plan_date.split('T')[0], // Normalize to YYYY-MM-DD
+                    day_number: targetDayNumber,
                     plan_type: 'web_assigned',
                     source_plan_id: assignment.id.toString(),
                     plan_category: assignment.category || 'General',
@@ -1515,9 +1065,9 @@ exports.submitDailyCompletion = async (req, res, next) => {
                   .returning('*');
                 
                 dailyPlan = createdPlan;
-                console.log(`✅ Created missing plan ${createdPlan.id} from assignment ${assignment.id} for date ${plan_date} (Day ${dayNumber}) - user is completing workouts`);
+                console.log(`✅ Created missing plan ${createdPlan.id} from assignment ${assignment.id} for day_number ${targetDayNumber} - user is completing workouts`);
               } else {
-                console.error(`❌ Invalid day number ${dayNumber} for assignment ${assignment.id} (has ${dailyPlans.length} days)`);
+                console.error(`❌ Invalid day number ${targetDayNumber} for assignment ${assignment.id} (has ${dailyPlans.length} days)`);
                 return res.status(404).json({
                   success: false,
                   message: `Daily training plan not found and could not be created (invalid day number)`
@@ -1546,17 +1096,17 @@ exports.submitDailyCompletion = async (req, res, next) => {
           });
         }
       } else {
-        // No source_plan_id or plan_date provided - cannot create the plan
-        console.error('❌ Daily plan not found and cannot create (missing source_plan_id or plan_date):', {
+        // No source_plan_id or day_number provided - cannot create the plan
+        console.error('❌ Daily plan not found and cannot create (missing source_plan_id or day_number):', {
           daily_plan_id,
           source_plan_id: req.body.source_plan_id,
-          plan_date: req.body.plan_date,
+          day_number: req.body.day_number,
           user_id,
           gym_id
         });
         return res.status(404).json({
           success: false,
-          message: 'Daily training plan not found. Please provide source_plan_id and plan_date to create it.'
+          message: 'Daily training plan not found. Please provide source_plan_id and day_number to create it.'
         });
       }
     }
@@ -1564,7 +1114,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
     // CRITICAL: Log the plan details to verify we have the correct plan
     console.log(`📋 Found daily plan to complete:`, {
       id: dailyPlan.id,
-      plan_date: dailyPlan.plan_date,
+      day_number: dailyPlan.day_number,
       source_plan_id: dailyPlan.source_plan_id,
       plan_type: dailyPlan.plan_type,
       user_id: dailyPlan.user_id,
@@ -1598,13 +1148,13 @@ exports.submitDailyCompletion = async (req, res, next) => {
       
       if (secondsSinceCompletion > 2) {
         // Completed more than 2 seconds ago - this is a duplicate request
-        console.warn(`⚠️ Plan ${daily_plan_id} (plan_date: ${dailyPlan.plan_date}) was already completed ${secondsSinceCompletion.toFixed(1)} seconds ago. Rejecting duplicate request.`);
+        console.warn(`⚠️ Plan ${daily_plan_id} (Day ${dailyPlan.day_number || 'N/A'}) was already completed ${secondsSinceCompletion.toFixed(1)} seconds ago. Rejecting duplicate request.`);
         return res.status(200).json({
           success: true,
           message: 'Plan was already completed',
           data: {
             daily_plan_id: daily_plan_id,
-            plan_date: dailyPlan.plan_date,
+            day_number: dailyPlan.day_number,
             is_completed: true,
             completed_at: dailyPlan.completed_at,
             already_completed: true
@@ -1632,16 +1182,16 @@ exports.submitDailyCompletion = async (req, res, next) => {
         .whereNotNull('completed_at')
         .where('completed_at', '>', new Date(Date.now() - 3000).toISOString()) // Last 3 seconds
         .whereNot({ id: daily_plan_id }) // Exclude the current plan
-        .select('id', 'plan_date', 'completed_at', 'is_completed')
+        .select('id', 'day_number', 'completed_at', 'is_completed')
         .orderBy('completed_at', 'desc');
       
       if (veryRecentCompletionsForSource.length > 0) {
         console.error(`❌ CRITICAL: Found ${veryRecentCompletionsForSource.length} other plan(s) from the same source_plan_id (${dailyPlan.source_plan_id}) completed in the last 3 seconds!`, {
           current_plan_id: daily_plan_id,
-          current_plan_date: dailyPlan.plan_date,
+          current_plan_day: dailyPlan.day_number,
           recent_completions: veryRecentCompletionsForSource.map(p => ({
             id: p.id,
-            plan_date: p.plan_date,
+            day_number: p.day_number,
             completed_at: p.completed_at,
             is_completed: p.is_completed
           }))
@@ -1805,7 +1355,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
     console.log(`📝 Marking daily plan ${daily_plan_id} as completed:`, {
       plan_id: daily_plan_id,
       plan_type: dailyPlan.plan_type,
-      plan_date: dailyPlan.plan_date,
+      day_number: dailyPlan.day_number,
       user_id: user_id,
       current_is_completed: dailyPlan.is_completed,
       current_completed_at: dailyPlan.completed_at
@@ -1822,17 +1372,17 @@ exports.submitDailyCompletion = async (req, res, next) => {
       })
       .whereNot({ id: daily_plan_id })
       .where({ is_completed: false })
-      .select('id', 'plan_date', 'is_completed');
+      .select('id', 'day_number', 'is_completed');
     
     console.log(`📊 Completion check: Found ${otherPlansCheck.length} other incomplete plans for same source_plan_id (${dailyPlan.source_plan_id})`);
     if (otherPlansCheck.length > 0) {
-      console.log(`📊 Other incomplete plans:`, otherPlansCheck.map(p => ({ id: p.id, plan_date: p.plan_date, is_completed: p.is_completed })));
+      console.log(`📊 Other incomplete plans:`, otherPlansCheck.map(p => ({ id: p.id, day_number: p.day_number, is_completed: p.is_completed })));
     }
 
     // Simple validation: Just ensure the plan exists before starting transaction
     const planInfo = await db('daily_training_plans')
       .where({ id: daily_plan_id })
-      .select('id', 'plan_date', 'source_plan_id', 'user_id')
+      .select('id', 'day_number', 'source_plan_id', 'user_id')
       .first();
     
     if (!planInfo) {
@@ -1851,7 +1401,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       // IMPORTANT: Double-check the plan exists and get its current state before update
       const planBeforeUpdate = await trx('daily_training_plans')
         .where({ id: daily_plan_id })
-        .select('id', 'plan_date', 'source_plan_id', 'plan_type', 'is_completed', 'completed_at', 'user_id')
+        .select('id', 'day_number', 'source_plan_id', 'plan_type', 'is_completed', 'completed_at', 'user_id')
         .first();
       
       if (!planBeforeUpdate) {
@@ -1884,7 +1434,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
         
         // If completed more than 5 seconds ago, this is likely a duplicate/retry request
         if (secondsSinceCompletion > 5) {
-          console.warn(`⚠️ WARNING: Plan ${daily_plan_id} (plan_date: ${planBeforeUpdate.plan_date}) was already completed ${secondsSinceCompletion.toFixed(1)} seconds ago!`, {
+          console.warn(`⚠️ WARNING: Plan ${daily_plan_id} (Day ${planBeforeUpdate.day_number || 'N/A'}) was already completed ${secondsSinceCompletion.toFixed(1)} seconds ago!`, {
             completed_at: planBeforeUpdate.completed_at,
             current_is_completed: planBeforeUpdate.is_completed
           });
@@ -1895,7 +1445,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
             message: 'Plan was already completed',
             data: {
               daily_plan_id: daily_plan_id,
-              plan_date: planBeforeUpdate.plan_date,
+              day_number: planBeforeUpdate.day_number,
               is_completed: true,
               completed_at: planBeforeUpdate.completed_at,
               already_completed: true
@@ -1903,7 +1453,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
           });
         } else {
           // Completed very recently (within 5 seconds) - might be a race condition or duplicate request
-          console.warn(`⚠️ WARNING: Plan ${daily_plan_id} (plan_date: ${planBeforeUpdate.plan_date}) was completed just ${secondsSinceCompletion.toFixed(1)} seconds ago! This might be a duplicate request.`);
+          console.warn(`⚠️ WARNING: Plan ${daily_plan_id} (Day ${planBeforeUpdate.day_number || 'N/A'}) was completed just ${secondsSinceCompletion.toFixed(1)} seconds ago! This might be a duplicate request.`);
         }
       }
       
@@ -1951,41 +1501,29 @@ exports.submitDailyCompletion = async (req, res, next) => {
         }
         
         if (assignmentStartDateStr) {
-          lastCompletedPlanQuery = lastCompletedPlanQuery.where('plan_date', '>=', assignmentStartDateStr);
+          // Ensure day_number is on/after start
+          const startDayNumber = Number(planBeforeUpdate.day_number) ? 1 : null; // fallback; cannot derive start day reliably, so do not filter by date
+          if (startDayNumber) {
+            lastCompletedPlanQuery = lastCompletedPlanQuery.where('day_number', '>=', startDayNumber);
+          }
         }
         
         const lastCompletedPlan = await lastCompletedPlanQuery
-          .select('id', 'plan_date', 'completed_at')
-          .orderBy('plan_date', 'desc')
+          .select('id', 'day_number', 'completed_at')
+          .orderBy('day_number', 'desc')
           .first();
         
         if (lastCompletedPlan) {
-          // Normalize dates
-          let lastCompletedDateStr, requestedDateStr;
-          // Helper to normalize any date (Date or string) to LOCAL YYYY-MM-DD to avoid UTC shift
-          const normalizeLocalDate = (value) => {
-            try {
-              const d = value instanceof Date ? value : new Date(value);
-              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-            } catch (e) {
-              return '';
-            }
-          };
+          const lastCompletedDay = Number(lastCompletedPlan.day_number || 0);
+          const requestedDay = Number(planBeforeUpdate.day_number || 0);
           
-          lastCompletedDateStr = normalizeLocalDate(lastCompletedPlan.plan_date);
-          requestedDateStr = normalizeLocalDate(planBeforeUpdate.plan_date);
-          
-          const lastCompletedDate = new Date(lastCompletedDateStr + 'T00:00:00.000Z');
-          const requestedDate = new Date(requestedDateStr + 'T00:00:00.000Z');
-          const daysDifference = Math.floor((requestedDate - lastCompletedDate) / (1000 * 60 * 60 * 24));
-          
-          if (daysDifference === 1) {
+          if (requestedDay === lastCompletedDay + 1) {
             isSequentialCompletion = true;
-            console.log(`✅ PRIMARY VALIDATION: Requested plan ${daily_plan_id} (${requestedDateStr}) is exactly 1 day after last completed plan (${lastCompletedDateStr}). This is valid sequential completion - ALLOWING and skipping other validations.`);
+            console.log(`✅ PRIMARY VALIDATION: Requested plan ${daily_plan_id} (Day ${requestedDay}) is exactly next after last completed day (${lastCompletedDay}).`);
           }
         } else {
           // CRITICAL: No completed plans yet - this is Day 1, explicitly allow it
-          console.log(`✅ PRIMARY VALIDATION: No completed plans found for assignment ${planBeforeUpdate.source_plan_id}. This is Day 1 - ALLOWING completion of plan ${daily_plan_id} (${planBeforeUpdate.plan_date}).`);
+          console.log(`✅ PRIMARY VALIDATION: No completed plans found for assignment ${planBeforeUpdate.source_plan_id}. This is Day 1 - ALLOWING completion of plan ${daily_plan_id} (day_number=${planBeforeUpdate.day_number}).`);
           isSequentialCompletion = true; // Treat Day 1 as valid sequential completion
         }
         
@@ -1997,21 +1535,21 @@ exports.submitDailyCompletion = async (req, res, next) => {
               source_plan_id: planBeforeUpdate.source_plan_id,
               is_stats_record: false
             })
-            .where('plan_date', '<', assignmentStartDateStr)
+            .where('day_number', '<', 1) // day_number before start is invalid; using 1 as minimum day
             .where(function() {
               this.where('is_completed', true)
                 .orWhere('is_completed', 't')
                 .orWhere('is_completed', 1);
             })
             .whereNotNull('completed_at')
-            .select('id', 'plan_date', 'is_completed', 'completed_at');
+            .select('id', 'day_number', 'is_completed', 'completed_at');
           
           if (duplicateCompletedPlans.length > 0) {
             console.warn(`⚠️ CRITICAL BUG DETECTED: Found ${duplicateCompletedPlans.length} COMPLETED plan(s) before start_date (${assignmentStartDateStr})!`);
             console.warn(`⚠️ These are duplicate Day 1 plans that cause completion bugs. Deleting them now.`);
             
             for (const duplicatePlan of duplicateCompletedPlans) {
-              console.warn(`⚠️ Deleting duplicate completed plan: id=${duplicatePlan.id}, plan_date=${duplicatePlan.plan_date}, is_completed=${duplicatePlan.is_completed}, completed_at=${duplicatePlan.completed_at}`);
+              console.warn(`⚠️ Deleting duplicate completed plan: id=${duplicatePlan.id}, day_number=${duplicatePlan.day_number}, is_completed=${duplicatePlan.is_completed}, completed_at=${duplicatePlan.completed_at}`);
               await trx('daily_training_plans')
                 .where({ id: duplicatePlan.id })
                 .del();
@@ -2028,7 +1566,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       }
       
       console.log(`📝 About to update plan ${daily_plan_id}:`, {
-        plan_date: planBeforeUpdate.plan_date,
+        day_number: planBeforeUpdate.day_number,
         source_plan_id: planBeforeUpdate.source_plan_id,
         plan_type: planBeforeUpdate.plan_type,
         current_is_completed: planBeforeUpdate.is_completed,
@@ -2044,14 +1582,14 @@ exports.submitDailyCompletion = async (req, res, next) => {
       
       // CRITICAL: Use id AND user_id in WHERE clause for safety
       // We use id (primary key) + user_id to ensure we're updating the correct user's plan
-      // NOTE: We removed plan_date and source_plan_id from WHERE to avoid timezone/format mismatch issues
+      // NOTE: We use day_number for sequencing to avoid timezone/format mismatch issues
       // The id is already a unique primary key, so adding user_id provides sufficient safety
       const completionTimestamp = new Date();
       
       console.log(`📝 About to execute UPDATE query:`, {
         daily_plan_id: daily_plan_id,
         user_id: user_id,
-        plan_date: planBeforeUpdate.plan_date,
+        day_number: planBeforeUpdate.day_number,
         source_plan_id: planBeforeUpdate.source_plan_id,
         current_is_completed: planBeforeUpdate.is_completed,
         current_completed_at: planBeforeUpdate.completed_at
@@ -2105,42 +1643,18 @@ exports.submitDailyCompletion = async (req, res, next) => {
           lastCompletedPlanQuery = lastCompletedPlanQuery.where('plan_type', planBeforeUpdate.plan_type);
         }
         
-        // CRITICAL: Only consider completed plans on/after assignment start_date
-        // This prevents the duplicate Day 1 bug where a completed plan on 2025-12-01 (before start_date 2025-12-02)
-        // causes the system to think Day 1 is already done, preventing Day 2 from being completed
-        if (assignmentStartDateStr) {
-          lastCompletedPlanQuery = lastCompletedPlanQuery.where('plan_date', '>=', assignmentStartDateStr);
-          console.log(`📅 Filtering last completed plan to only consider plans on/after assignment start_date: ${assignmentStartDateStr}`);
-        }
-        
         const lastCompletedPlan = await lastCompletedPlanQuery
-          .select('id', 'plan_date', 'completed_at')
-          .orderBy('plan_date', 'desc')
+          .select('id', 'day_number', 'completed_at')
+          .orderBy('day_number', 'desc')
           .first();
 
         if (lastCompletedPlan) {
-          // Normalize dates to compare
-          let lastCompletedDateStr, requestedDateStr;
-          if (lastCompletedPlan.plan_date instanceof Date) {
-            const d = lastCompletedPlan.plan_date;
-            lastCompletedDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          } else if (typeof lastCompletedPlan.plan_date === 'string') {
-            lastCompletedDateStr = lastCompletedPlan.plan_date.split('T')[0];
-          } else {
-            lastCompletedDateStr = new Date(lastCompletedPlan.plan_date).toISOString().split('T')[0];
-          }
+          // Get day numbers for comparison
+          const lastCompletedDay = lastCompletedPlan.day_number || 0;
+          const requestedDay = planBeforeUpdate.day_number || 0;
           
-          if (planBeforeUpdate.plan_date instanceof Date) {
-            const d = planBeforeUpdate.plan_date;
-            requestedDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          } else if (typeof planBeforeUpdate.plan_date === 'string') {
-            requestedDateStr = planBeforeUpdate.plan_date.split('T')[0];
-          } else {
-            requestedDateStr = new Date(planBeforeUpdate.plan_date).toISOString().split('T')[0];
-          }
-          
-          // Fetch earliest plan date for this assignment to avoid blocking Day 1 because of timezone shifts
-          let earliestPlanDateStr = null;
+          // Fetch earliest day_number for this assignment to allow Day 1 start
+          let earliestDayNumber = null;
           try {
             const earliestPlan = await trx('daily_training_plans')
               .where({
@@ -2148,31 +1662,29 @@ exports.submitDailyCompletion = async (req, res, next) => {
                 source_plan_id: planBeforeUpdate.source_plan_id,
                 is_stats_record: false
               })
-              .min('plan_date as min_date')
+              .min('day_number as min_day')
               .first();
-            if (earliestPlan && earliestPlan.min_date) {
-              earliestPlanDateStr = normalizeLocalDate(earliestPlan.min_date);
+            if (earliestPlan && earliestPlan.min_day !== null) {
+              earliestDayNumber = earliestPlan.min_day;
             }
           } catch (e) {
-            console.warn('⚠️ Unable to fetch earliest plan date for hard guard check', e);
+            console.warn('⚠️ Unable to fetch earliest day_number for hard guard check', e);
           }
           
-          // If this is the earliest plan date for the assignment, allow (Day 1 start)
-          if (earliestPlanDateStr && requestedDateStr === earliestPlanDateStr) {
-            console.log(`✅ HARD GUARD: Requested plan ${daily_plan_id} is the earliest plan date (${requestedDateStr}) for source_plan_id ${planBeforeUpdate.source_plan_id}. Allowing to avoid blocking Day 1.`);
+          // If this is Day 1 (earliest day_number), allow it
+          if (earliestDayNumber !== null && requestedDay === earliestDayNumber) {
+            console.log(`✅ HARD GUARD: Requested plan ${daily_plan_id} is Day ${requestedDay} (earliest day) for source_plan_id ${planBeforeUpdate.source_plan_id}. Allowing to start the plan.`);
           }
           
-          // Calculate if requested date is exactly 1 day after last completed date
-          const lastCompletedDate = new Date(lastCompletedDateStr + 'T00:00:00.000Z');
-          const requestedDate = new Date(requestedDateStr + 'T00:00:00.000Z');
-          const daysDifference = Math.floor((requestedDate - lastCompletedDate) / (1000 * 60 * 60 * 24));
+          // Calculate day difference (requestedDay - lastCompletedDay)
+          const dayDifference = requestedDay - lastCompletedDay;
           
           // Allow if it's the next sequential day (exactly 1 day after)
           // This is the PRIMARY validation - if it's sequential, allow it regardless of other checks
-          if (daysDifference === 1) {
-            console.log(`✅ HARD GUARD: Requested plan ${daily_plan_id} (${requestedDateStr}) is the next sequential day after last completed plan (${lastCompletedDateStr}). ALLOWING completion - bypassing other validations.`);
+          if (dayDifference === 1) {
+            console.log(`✅ HARD GUARD: Requested plan ${daily_plan_id} (Day ${requestedDay}) is the next sequential day after last completed plan (Day ${lastCompletedDay}). ALLOWING completion - bypassing other validations.`);
             // Skip the rest of the HARD GUARD validation - this is valid sequential completion
-          } else if (daysDifference === 0) {
+          } else if (dayDifference === 0) {
             // Same day - check if it's the same plan (shouldn't happen, but handle gracefully)
             if (lastCompletedPlan.id === daily_plan_id) {
               console.log(`⚠️ WARNING: Attempting to complete the same plan that's already completed. This is likely a duplicate request.`);
@@ -2182,75 +1694,75 @@ exports.submitDailyCompletion = async (req, res, next) => {
                 message: 'Plan was already completed',
                 data: {
                   daily_plan_id: daily_plan_id,
-                  plan_date: requestedDateStr,
+                  day_number: requestedDay,
                   is_completed: true,
                   completed_at: lastCompletedPlan.completed_at,
                   already_completed: true
                 }
               });
             } else {
-              // Different plan on same date - reject
-              console.error(`❌ HARD GUARD: Requested plan ${daily_plan_id} (${requestedDateStr}) is on the same date as last completed plan ${lastCompletedPlan.id} (${lastCompletedDateStr}). Rejecting.`);
+              // Different plan on same day_number - reject
+              console.error(`❌ HARD GUARD: Requested plan ${daily_plan_id} (Day ${requestedDay}) is on the same day as last completed plan ${lastCompletedPlan.id} (Day ${lastCompletedDay}). Rejecting.`);
               await trx.rollback();
               return res.status(400).json({
                 success: false,
-                message: `You cannot complete multiple plans on the same date (${requestedDateStr}). The last completed plan is on the same date.`,
-                error: 'SAME_DATE_COMPLETION',
-                last_completed_date: lastCompletedDateStr,
-                requested_date: requestedDateStr
+                message: `You cannot complete multiple plans on Day ${requestedDay}. The last completed plan is on the same day.`,
+                error: 'SAME_DAY_COMPLETION',
+                last_completed_day: lastCompletedDay,
+                requested_day: requestedDay
               });
             }
-          } else if (daysDifference < 0) {
-            // Reject if it's the same day or before the last completed day
-            console.error(`❌ HARD GUARD: Requested plan ${daily_plan_id} (${requestedDateStr}) is on or before the last completed plan (${lastCompletedDateStr}). Rejecting.`, {
+          } else if (dayDifference < 0) {
+            // Reject if it's before the last completed day
+            console.error(`❌ HARD GUARD: Requested plan ${daily_plan_id} (Day ${requestedDay}) is before the last completed plan (Day ${lastCompletedDay}). Rejecting.`, {
               current_plan_id: daily_plan_id,
-              current_plan_date: planBeforeUpdate.plan_date,
-              requested_date: requestedDateStr,
+              current_day_number: planBeforeUpdate.day_number,
+              requested_day: requestedDay,
               source_plan_id: planBeforeUpdate.source_plan_id,
               last_completed: {
                 id: lastCompletedPlan.id,
-                plan_date: lastCompletedPlan.plan_date,
+                day_number: lastCompletedPlan.day_number,
                 completed_at: lastCompletedPlan.completed_at
               },
-              days_difference: daysDifference
+              day_difference: dayDifference
             });
 
             await trx.rollback();
             return res.status(400).json({
               success: false,
-              message: `You must complete days in order. The last completed day is ${lastCompletedDateStr}, but you're trying to complete ${requestedDateStr}.`,
+              message: `You must complete days in order. The last completed day is Day ${lastCompletedDay}, but you're trying to complete Day ${requestedDay}.`,
               error: 'INVALID_COMPLETION_ORDER',
-              last_completed_date: lastCompletedDateStr,
-              requested_date: requestedDateStr
+              last_completed_day: lastCompletedDay,
+              requested_day: requestedDay
             });
           } else {
             // Reject if it's skipping days (more than 1 day after)
-            console.error(`❌ HARD GUARD: Requested plan ${daily_plan_id} (${requestedDateStr}) is skipping days. Last completed was ${lastCompletedDateStr}, but requested is ${daysDifference} days later. Rejecting.`, {
+            console.error(`❌ HARD GUARD: Requested plan ${daily_plan_id} (Day ${requestedDay}) is skipping days. Last completed was Day ${lastCompletedDay}, but requested is ${dayDifference} day(s) later. Rejecting.`, {
               current_plan_id: daily_plan_id,
-              current_plan_date: planBeforeUpdate.plan_date,
-              requested_date: requestedDateStr,
+              current_day_number: planBeforeUpdate.day_number,
+              requested_day: requestedDay,
               source_plan_id: planBeforeUpdate.source_plan_id,
               last_completed: {
                 id: lastCompletedPlan.id,
-                plan_date: lastCompletedPlan.plan_date,
+                day_number: lastCompletedPlan.day_number,
                 completed_at: lastCompletedPlan.completed_at
               },
-              days_difference: daysDifference
+              day_difference: dayDifference
             });
 
             await trx.rollback();
             return res.status(400).json({
               success: false,
-              message: `You must complete days in order. The last completed day is ${lastCompletedDateStr}, but you're trying to complete ${requestedDateStr} (skipping ${daysDifference - 1} day(s)).`,
+              message: `You must complete days in order. The last completed day is Day ${lastCompletedDay}, but you're trying to complete Day ${requestedDay} (skipping ${dayDifference - 1} day(s)).`,
               error: 'SKIPPED_DAYS_COMPLETION',
-              last_completed_date: lastCompletedDateStr,
-              requested_date: requestedDateStr,
-              days_skipped: daysDifference - 1
+              last_completed_day: lastCompletedDay,
+              requested_day: requestedDay,
+              days_skipped: dayDifference - 1
             });
           }
         } else {
           // No completed plans yet - allow any completion (user can start from any day)
-          console.log(`✅ ALLOWING: No completed plans yet for this assignment. Allowing completion of plan ${daily_plan_id} (${planBeforeUpdate.plan_date}).`);
+          console.log(`✅ ALLOWING: No completed plans yet for this assignment. Allowing completion of plan ${daily_plan_id} (Day ${planBeforeUpdate.day_number || 'N/A'}).`);
         }
       }
 
@@ -2263,7 +1775,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
           user_id: user_id,
           is_stats_record: false
         })
-        .select('id', 'plan_date', 'source_plan_id', 'plan_type', 'is_completed', 'completed_at')
+        .select('id', 'day_number', 'source_plan_id', 'plan_type', 'is_completed', 'completed_at')
         .first();
       
       if (!preUpdateCheck) {
@@ -2293,28 +1805,28 @@ exports.submitDailyCompletion = async (req, res, next) => {
         return String(id);
       };
       
-      const preUpdateDate = normalizeDate(preUpdateCheck.plan_date);
-      const expectedDate = normalizeDate(planBeforeUpdate.plan_date);
+      const preUpdateDayNumber = preUpdateCheck.day_number != null ? Number(preUpdateCheck.day_number) : null;
+      const expectedDayNumber = planBeforeUpdate.day_number != null ? Number(planBeforeUpdate.day_number) : null;
       const preUpdateSourceId = normalizeId(preUpdateCheck.source_plan_id);
       const expectedSourceId = normalizeId(planBeforeUpdate.source_plan_id);
       const preUpdateType = String(preUpdateCheck.plan_type || '');
       const expectedType = String(planBeforeUpdate.plan_type || '');
       
-      if (preUpdateDate !== expectedDate || 
+      if (preUpdateDayNumber !== expectedDayNumber || 
           preUpdateSourceId !== expectedSourceId ||
           preUpdateType !== expectedType) {
         console.error(`❌ CRITICAL: Plan ${daily_plan_id} details don't match!`, {
           pre_update: {
-            plan_date: preUpdateCheck.plan_date,
-            plan_date_normalized: preUpdateDate,
+            day_number: preUpdateCheck.day_number,
+            day_number_normalized: preUpdateDayNumber,
             source_plan_id: preUpdateCheck.source_plan_id,
             source_plan_id_normalized: preUpdateSourceId,
             plan_type: preUpdateCheck.plan_type,
             plan_type_normalized: preUpdateType
           },
           expected: {
-            plan_date: planBeforeUpdate.plan_date,
-            plan_date_normalized: expectedDate,
+            day_number: planBeforeUpdate.day_number,
+            day_number_normalized: expectedDayNumber,
             source_plan_id: planBeforeUpdate.source_plan_id,
             source_plan_id_normalized: expectedSourceId,
             plan_type: planBeforeUpdate.plan_type,
@@ -2329,7 +1841,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       }
       
       console.log(`✅ Pre-update verification passed: Plan ${daily_plan_id} details match`, {
-        plan_date: preUpdateDate,
+        day_number: preUpdateDayNumber,
         source_plan_id: preUpdateSourceId,
         plan_type: preUpdateType
       });
@@ -2344,15 +1856,15 @@ exports.submitDailyCompletion = async (req, res, next) => {
           is_stats_record: false
         })
         .whereNot({ id: daily_plan_id })
-        .where({ plan_date: planBeforeUpdate.plan_date }) // Same date
-        .select('id', 'plan_date', 'is_completed');
+        .where({ day_number: planBeforeUpdate.day_number }) // Same day_number
+        .select('id', 'day_number', 'is_completed');
       
       if (otherPlansCheck.length > 0) {
-        console.error(`❌ CRITICAL: Found ${otherPlansCheck.length} other plan(s) with same date (${planBeforeUpdate.plan_date}) for same user/assignment!`, {
+        console.error(`❌ CRITICAL: Found ${otherPlansCheck.length} other plan(s) with same day_number (Day ${planBeforeUpdate.day_number}) for same user/assignment!`, {
           current_plan_id: daily_plan_id,
           other_plans: otherPlansCheck.map(p => ({
             id: p.id,
-            plan_date: p.plan_date,
+            day_number: p.day_number,
             is_completed: p.is_completed
           }))
         });
@@ -2366,7 +1878,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
           id: daily_plan_id,
           user_id: user_id
         })
-        .select('id', 'plan_date', 'source_plan_id', 'is_completed', 'completed_at')
+        .select('id', 'day_number', 'source_plan_id', 'is_completed', 'completed_at')
         .first();
       
       if (!finalSafetyCheck) {
@@ -2380,7 +1892,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       
       console.log(`🔴 [FINAL SAFETY CHECK] About to complete plan:`, {
         id: finalSafetyCheck.id,
-        plan_date: finalSafetyCheck.plan_date,
+        day_number: finalSafetyCheck.day_number,
         source_plan_id: finalSafetyCheck.source_plan_id,
         current_is_completed: finalSafetyCheck.is_completed,
         current_completed_at: finalSafetyCheck.completed_at,
@@ -2446,7 +1958,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
           message: 'Plan was already completed',
           data: {
             daily_plan_id: daily_plan_id,
-            plan_date: planToUpdate.plan_date,
+            day_number: planToUpdate.day_number,
             is_completed: true,
             completed_at: planToUpdate.completed_at,
             already_completed: true
@@ -2471,7 +1983,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
         });
       
       console.log(`📝 Update query executed - Rows affected: ${updateResult}`);
-      console.log(`✅ Updated ${updateResult} row(s) - Set is_completed=true and completed_at for plan ${daily_plan_id} (plan_date: ${planBeforeUpdate.plan_date})`);
+      console.log(`✅ Updated ${updateResult} row(s) - Set is_completed=true and completed_at for plan ${daily_plan_id} (Day ${planBeforeUpdate.day_number || 'N/A'})`);
       
       // CRITICAL: Verify that ONLY the intended plan was updated
       // Check if any OTHER plans were accidentally marked as completed
@@ -2489,17 +2001,17 @@ exports.submitDailyCompletion = async (req, res, next) => {
         })
         .whereNotNull('completed_at')
         .whereRaw('completed_at > NOW() - INTERVAL \'5 seconds\'') // Check for plans completed in last 5 seconds
-        .select('id', 'plan_date', 'is_completed', 'completed_at');
+        .select('id', 'day_number', 'is_completed', 'completed_at');
       
       if (postUpdateSafetyCheck.length > 0) {
         console.error(`❌ CRITICAL BUG DETECTED: Found ${postUpdateSafetyCheck.length} OTHER plan(s) that were completed in the last 5 seconds! This suggests Day 3 was automatically completed when Day 2 was completed.`, {
           intended_plan: {
             id: daily_plan_id,
-            plan_date: planBeforeUpdate.plan_date
+            day_number: planBeforeUpdate.day_number
           },
           other_completed_plans: postUpdateSafetyCheck.map(p => ({
             id: p.id,
-            plan_date: p.plan_date,
+            day_number: p.day_number,
             completed_at: p.completed_at
           }))
         });
@@ -2512,11 +2024,11 @@ exports.submitDailyCompletion = async (req, res, next) => {
           error: 'MULTIPLE_PLANS_COMPLETED',
           intended_plan: {
             id: daily_plan_id,
-            plan_date: planBeforeUpdate.plan_date
+            day_number: planBeforeUpdate.day_number
           },
           other_completed_plans: postUpdateSafetyCheck.map(p => ({
             id: p.id,
-            plan_date: p.plan_date
+            day_number: p.day_number
           }))
         });
       }
@@ -2566,16 +2078,16 @@ exports.submitDailyCompletion = async (req, res, next) => {
           .whereNotNull('completed_at')
           .where('completed_at', '>=', new Date(completionTimestamp.getTime() - 5000).toISOString()) // Within 5 seconds
           .where('completed_at', '<=', new Date(completionTimestamp.getTime() + 5000).toISOString())
-          .select('id', 'plan_date', 'completed_at', 'is_completed');
+          .select('id', 'day_number', 'completed_at', 'is_completed');
         
         if (postUpdateCheck.length > 0) {
           // Log warning but don't block - this helps diagnose if the bug occurs
           console.warn(`⚠️ WARNING: Found ${postUpdateCheck.length} other plan(s) completed around the same time as plan ${daily_plan_id}. This might indicate the Day 2 bug, but we're not blocking to avoid false positives.`, {
             updated_plan_id: daily_plan_id,
-            updated_plan_date: planBeforeUpdate.plan_date,
+            updated_day_number: planBeforeUpdate.day_number,
             other_plans: postUpdateCheck.map(p => ({
               id: p.id,
-              plan_date: p.plan_date,
+              day_number: p.day_number,
               completed_at: p.completed_at,
               is_completed: p.is_completed
             }))
@@ -2588,7 +2100,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
 
       // Verify the update immediately within the transaction
       const verifyInTransaction = await trx('daily_training_plans')
-        .select('id', 'is_completed', 'completed_at', 'plan_type', 'plan_date', 'source_plan_id')
+        .select('id', 'is_completed', 'completed_at', 'plan_type', 'day_number', 'source_plan_id')
         .where({ id: daily_plan_id })
         .first();
 
@@ -2621,7 +2133,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
 
       console.log(`✅ Verified update within transaction:`, {
         id: verifyInTransaction.id,
-        plan_date: verifyInTransaction.plan_date,
+        day_number: verifyInTransaction.day_number,
         source_plan_id: verifyInTransaction.source_plan_id,
         is_completed: verifyInTransaction.is_completed,
         completed_at: verifyInTransaction.completed_at,
@@ -2640,7 +2152,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
         .whereNot({ id: daily_plan_id })
         .where({ is_completed: true })
         .whereNotNull('completed_at')
-        .select('id', 'plan_date', 'is_completed', 'completed_at')
+        .select('id', 'day_number', 'is_completed', 'completed_at')
         .orderBy('completed_at', 'desc')
         .limit(5); // Check last 5 completed plans
       
@@ -2656,10 +2168,10 @@ exports.submitDailyCompletion = async (req, res, next) => {
       if (suspiciousPlans.length > 0) {
         console.error(`❌ CRITICAL WARNING: Found ${suspiciousPlans.length} other plan(s) completed at nearly the same time!`, {
           updated_plan_id: daily_plan_id,
-          updated_plan_date: verifyInTransaction.plan_date,
+          updated_day_number: verifyInTransaction.day_number,
           suspicious_plans: suspiciousPlans.map(p => ({
             id: p.id,
-            plan_date: p.plan_date,
+            day_number: p.day_number,
             completed_at: p.completed_at
           }))
         });
@@ -2671,6 +2183,106 @@ exports.submitDailyCompletion = async (req, res, next) => {
       try {
         await trx.commit();
         commitSuccessful = true;
+        
+        // CRITICAL: After successful completion, create the next day if it doesn't exist
+        // This ensures Day 2 appears immediately after Day 1 is completed (matching manual plan behavior)
+        if (planBeforeUpdate.source_plan_id && planBeforeUpdate.day_number != null) {
+          try {
+            // Get the assignment to find the next day
+            const assignment = await db('training_plan_assignments')
+              .where({ id: planBeforeUpdate.source_plan_id })
+              .orWhere({ id: planBeforeUpdate.source_plan_id.toString() })
+              .first();
+            
+            if (assignment && assignment.daily_plans) {
+              // Parse daily_plans
+              let dailyPlans = null;
+              try {
+                dailyPlans = typeof assignment.daily_plans === 'string'
+                  ? JSON.parse(assignment.daily_plans)
+                  : assignment.daily_plans;
+              } catch (e) {
+                console.error('❌ Error parsing assignment daily_plans for next day creation:', e);
+              }
+              
+              if (Array.isArray(dailyPlans) && dailyPlans.length > 0) {
+                // Use day_number directly (no date calculation needed)
+                const completedDayNumber = Number(planBeforeUpdate.day_number);
+                // day_number is 1-indexed, so next day is completedDayNumber + 1
+                const targetDayNumber = completedDayNumber + 1;
+                // Array index is 0-indexed, so Day 1 → index 0, Day 2 → index 1, etc.
+                const nextDayIndex = completedDayNumber; // Day 1 → index 0, Day 2 → index 1
+                
+                console.log(`📅 Auto-creating next day: completedDayNumber=${completedDayNumber}, targetDayNumber=${targetDayNumber}, nextDayIndex=${nextDayIndex}, dailyPlans.length=${dailyPlans.length}`);
+                
+                // Check if next day exists in daily_plans and doesn't exist in database
+                if (nextDayIndex < dailyPlans.length) {
+                  const nextDayPlan = dailyPlans[nextDayIndex];
+                  
+                  console.log(`🔍 Checking if next day exists: day_number=${targetDayNumber}, source_plan_id=${assignment.id}, user_id=${user_id}`);
+                  
+                  // Check if next day already exists
+                  const existingNextDay = await db('daily_training_plans')
+                    .where({
+                      user_id: user_id,
+                      source_plan_id: assignment.id.toString(),
+                      day_number: targetDayNumber,
+                      is_stats_record: false
+                    })
+                    .modify((qb) => {
+                      if (assignment.gym_id != null) {
+                        qb.andWhere({ gym_id: assignment.gym_id });
+                      }
+                    })
+                    .first();
+                  
+                  if (existingNextDay) {
+                    console.log(`✅ Next day already exists in database - plan_id: ${existingNextDay.id}, day_number: ${targetDayNumber}, is_completed: ${existingNextDay.is_completed}`);
+                  } else {
+                    console.log(`📝 Next day does NOT exist, creating it now - day_number: ${targetDayNumber}`);
+                  }
+                  
+                  if (!existingNextDay) {
+                    // Create the next day in the database
+                    const nextDayWorkouts = nextDayPlan.workouts || nextDayPlan.exercises || [];
+                    
+                    try {
+                      const [createdNextDay] = await db('daily_training_plans')
+                        .insert({
+                          user_id: user_id,
+                          gym_id: assignment.gym_id,
+                          day_number: targetDayNumber,
+                          plan_type: 'web_assigned',
+                          source_plan_id: assignment.id.toString(),
+                          plan_category: assignment.category || 'General',
+                          user_level: assignment.user_level || 'Beginner',
+                          exercises_details: JSON.stringify(nextDayWorkouts),
+                          is_completed: false,
+                          completed_at: null,
+                          is_stats_record: false
+                        })
+                        .returning('*');
+                      
+                      console.log(`✅ Auto-created next day (Day ${targetDayNumber}) in database after Day ${completedDayNumber} completion - plan_id: ${createdNextDay.id}`);
+                    } catch (createErr) {
+                      // Handle duplicate key errors gracefully
+                      if (createErr.code === '23505') {
+                        console.log(`⚠️ Next day already exists (duplicate key), skipping creation`);
+                      } else {
+                        console.error(`❌ Error auto-creating next day:`, createErr);
+                      }
+                    }
+                  } else {
+                    console.log(`✅ Next day already exists in database - plan_id: ${existingNextDay.id}, day_number: ${targetDayNumber}`);
+                  }
+                }
+              }
+            }
+          } catch (nextDayErr) {
+            // Don't fail the completion if next day creation fails
+            console.error(`⚠️ Error creating next day after completion:`, nextDayErr);
+          }
+        }
         console.log(`✅ Transaction committed successfully for plan ${daily_plan_id}`);
       } catch (commitErr) {
         console.error(`❌ CRITICAL: Error committing transaction:`, commitErr);
@@ -2694,7 +2306,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
         try {
           postCommitVerification = await db('daily_training_plans')
             .where({ id: daily_plan_id })
-            .select('id', 'is_completed', 'completed_at', 'plan_date', 'source_plan_id')
+            .select('id', 'is_completed', 'completed_at', 'day_number', 'source_plan_id')
             .first();
           
           if (postCommitVerification) break;
@@ -2732,7 +2344,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
             is_completed_type: typeof postCommitVerification.is_completed,
             completed_at: postCommitVerification.completed_at,
             completed_at_type: typeof postCommitVerification.completed_at,
-            plan_date: postCommitVerification.plan_date
+            day_number: postCommitVerification.day_number
           });
           
           // Try to fix it one more time (outside transaction)
@@ -2775,7 +2387,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
           console.log(`✅ Post-commit verification passed for plan ${daily_plan_id}:`, {
             is_completed: postCommitVerification.is_completed,
             completed_at: postCommitVerification.completed_at,
-            plan_date: postCommitVerification.plan_date
+            day_number: postCommitVerification.day_number
           });
         }
       }
@@ -2879,7 +2491,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       is_completed: updatedPlan.is_completed,
       completed_at: updatedPlan.completed_at,
       plan_type: updatedPlan.plan_type,
-      plan_date: updatedPlan.plan_date
+      day_number: updatedPlan.day_number
     });
 
     // Parse exercises_details as items (handle both array and object formats)
@@ -2953,7 +2565,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       
       // Verify completion status is still set after snapshot update
       const afterSnapshot = await db('daily_training_plans')
-        .select('is_completed', 'completed_at', 'plan_type', 'plan_date')
+        .select('is_completed', 'completed_at', 'plan_type', 'day_number')
         .where({ id: daily_plan_id })
         .first();
       
@@ -2977,7 +2589,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
           is_completed: afterSnapshot.is_completed,
           completed_at: afterSnapshot.completed_at,
           plan_type: afterSnapshot.plan_type,
-          plan_date: afterSnapshot.plan_date
+          day_number: afterSnapshot.day_number
         });
       }
     } catch (snapErr) {
@@ -2991,7 +2603,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
         io.to(`gym:${gym_id}`).emit('dailyTraining:completed', {
           daily_plan_id: daily_plan_id,
           user_id: user_id,
-          plan_date: updatedPlan.plan_date,
+          day_number: updatedPlan.day_number,
           completion_data: completion_data,
           source: 'mobile_app'
         });
@@ -3002,7 +2614,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
 
     // Final verification: Query the database one more time to ensure completion status is persisted
     const finalVerification = await db('daily_training_plans')
-      .select('id', 'is_completed', 'completed_at', 'plan_type', 'plan_date', 'source_plan_id')
+      .select('id', 'is_completed', 'completed_at', 'plan_type', 'day_number', 'source_plan_id')
       .where({ id: daily_plan_id })
       .first();
     
@@ -3012,7 +2624,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
         is_completed: finalVerification?.is_completed,
         completed_at: finalVerification?.completed_at,
         plan_type: finalVerification?.plan_type,
-        plan_date: finalVerification?.plan_date
+        day_number: finalVerification?.day_number
       });
       
       // Try one more time to set it
@@ -3029,7 +2641,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
         is_completed: finalVerification.is_completed,
         completed_at: finalVerification.completed_at,
         plan_type: finalVerification.plan_type,
-        plan_date: finalVerification.plan_date,
+        day_number: finalVerification.day_number,
         source_plan_id: finalVerification.source_plan_id
       });
       
@@ -3042,8 +2654,8 @@ exports.submitDailyCompletion = async (req, res, next) => {
           plan_type: finalVerification.plan_type,
           is_stats_record: false
         })
-        .select('id', 'plan_date', 'is_completed', 'completed_at')
-        .orderBy('plan_date', 'asc');
+        .select('id', 'day_number', 'is_completed', 'completed_at')
+        .orderBy('day_number', 'asc');
       
       const completedPlans = allPlansForSource.filter(p => p.is_completed && p.completed_at);
       const incompletePlans = allPlansForSource.filter(p => !p.is_completed || !p.completed_at);
@@ -3052,8 +2664,8 @@ exports.submitDailyCompletion = async (req, res, next) => {
         total: allPlansForSource.length,
         completed: completedPlans.length,
         incomplete: incompletePlans.length,
-        completed_plan_dates: completedPlans.map(p => p.plan_date),
-        incomplete_plan_dates: incompletePlans.map(p => p.plan_date)
+        completed_plan_days: completedPlans.map(p => p.day_number),
+        incomplete_plan_days: incompletePlans.map(p => p.day_number)
       });
       
       // Check if multiple plans were completed at nearly the same time (suspicious)
@@ -3071,10 +2683,10 @@ exports.submitDailyCompletion = async (req, res, next) => {
         if (recentCompletions.length > 1) {
           console.error(`❌ CRITICAL: Multiple plans (${recentCompletions.length}) were completed within the last 10 seconds!`, {
             updated_plan_id: daily_plan_id,
-            updated_plan_date: finalVerification.plan_date,
+            updated_day_number: finalVerification.day_number,
             all_recent_completions: recentCompletions.map(p => ({
               id: p.id,
-              plan_date: p.plan_date,
+              day_number: p.day_number,
               completed_at: p.completed_at
             }))
           });
@@ -3117,7 +2729,7 @@ exports.submitDailyCompletion = async (req, res, next) => {
       message: 'Daily training completion submitted successfully',
       data: {
         daily_plan_id: daily_plan_id,
-        plan_date: updatedPlan.plan_date,
+        day_number: finalVerification?.day_number || updatedPlan.day_number,
         is_completed: finalVerification?.is_completed || true,
         completed_at: finalVerification?.completed_at || updatedPlan.completed_at,
         plan_type: finalVerification?.plan_type || updatedPlan.plan_type,
@@ -3168,17 +2780,14 @@ exports.getTrainingStats = async (req, res, next) => {
     }
 
     let query = db('daily_training_plans')
-      .where({ user_id: targetUserId, gym_id: gym_id });
+      .where({ user_id: targetUserId, gym_id: gym_id })
+      .whereNotNull('day_number'); // Only include plans with day_number
 
-    // Apply date filters
-    if (start_date) {
-      query = query.andWhere('plan_date', '>=', start_date);
-    }
-    if (end_date) {
-      query = query.andWhere('plan_date', '<=', end_date);
-    }
+    // NOTE: Date-based filtering removed - day_number is sequential and doesn't map to calendar dates
+    // If date range filtering is needed, it should be implemented at the assignment level
+    // by filtering assignments by date range, then getting their daily plans
 
-    const plans = await query.orderBy('plan_date', 'desc');
+    const plans = await query.orderBy('day_number', 'desc');
 
     // Calculate stats
     const stats = {
@@ -3191,7 +2800,7 @@ exports.getTrainingStats = async (req, res, next) => {
       total_weight_kg: plans.reduce((sum, p) => sum + (Number(p.total_weight_kg) || 0), 0),
       completion_rate: plans.length > 0 ? (plans.filter(p => p.is_completed).length / plans.length * 100).toFixed(2) : 0,
       plans_by_category: {},
-      plans_by_date: {}
+      plans_by_day: {} // Changed from plans_by_date to plans_by_day (grouped by day_number)
     };
 
     // Group by category
@@ -3211,21 +2820,25 @@ exports.getTrainingStats = async (req, res, next) => {
       stats.plans_by_category[category].total_minutes += plan.training_minutes || 0;
     });
 
-    // Group by date
+    // Group by day_number
     plans.forEach(plan => {
-      const date = plan.plan_date;
-      if (!stats.plans_by_date[date]) {
-        stats.plans_by_date[date] = {
+      const dayNumber = plan.day_number;
+      if (dayNumber == null) return; // Skip plans without day_number
+      
+      const dayKey = `Day ${dayNumber}`;
+      if (!stats.plans_by_day[dayKey]) {
+        stats.plans_by_day[dayKey] = {
+          day_number: dayNumber,
           total: 0,
           completed: 0,
           total_minutes: 0
         };
       }
-      stats.plans_by_date[date].total++;
+      stats.plans_by_day[dayKey].total++;
       if (plan.is_completed) {
-        stats.plans_by_date[date].completed++;
+        stats.plans_by_day[dayKey].completed++;
       }
-      stats.plans_by_date[date].total_minutes += plan.training_minutes || 0;
+      stats.plans_by_day[dayKey].total_minutes += plan.training_minutes || 0;
     });
 
     res.json({
@@ -3252,7 +2865,7 @@ exports.createDailyPlan = async (req, res, next) => {
   try {
     const {
       user_id,
-      plan_date,
+      day_number,
       plan_type,
       source_plan_id,
       plan_category,
@@ -3264,10 +2877,19 @@ exports.createDailyPlan = async (req, res, next) => {
     const gym_id = req.user.gym_id;
 
     // Validate required fields
-    if (!user_id || !plan_date || !plan_type || !plan_category) {
+    if (!user_id || day_number == null || !plan_type || !plan_category) {
       return res.status(400).json({
         success: false,
-        message: 'user_id, plan_date, plan_type, and plan_category are required'
+        message: 'user_id, day_number, plan_type, and plan_category are required'
+      });
+    }
+
+    // Validate day_number is a positive integer
+    const dayNumber = Number(day_number);
+    if (!Number.isInteger(dayNumber) || dayNumber < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'day_number must be a positive integer (1, 2, 3, etc.)'
       });
     }
 
@@ -3276,7 +2898,7 @@ exports.createDailyPlan = async (req, res, next) => {
       .insert({
         user_id,
         gym_id,
-        plan_date,
+        day_number: dayNumber,
         plan_type,
         source_plan_id,
         plan_category,
@@ -3318,17 +2940,21 @@ exports.storeDailyPlansFromMobile = async (req, res, next) => {
     }
 
     const created = [];
-    for (const day of daily_plans) {
+    for (let index = 0; index < daily_plans.length; index++) {
+      const day = daily_plans[index];
       const {
-        plan_date,
+        day_number, // Accept day_number from request if provided
         user_level = 'Beginner',
         plan_category = null,
         exercises_details = []
       } = day;
 
+      // Calculate day_number: use provided day_number or calculate from array index (1-indexed)
+      const calculatedDayNumber = day_number || (index + 1);
+
       // Validate exercises_details
       if (!Array.isArray(exercises_details)) {
-        return res.status(400).json({ success: false, message: `exercises_details must be an array for date ${plan_date}` });
+        return res.status(400).json({ success: false, message: `exercises_details must be an array for day ${calculatedDayNumber}` });
       }
 
       // Compute derived totals from array to avoid client/server mismatch
@@ -3340,9 +2966,9 @@ exports.storeDailyPlansFromMobile = async (req, res, next) => {
         total_weight_kg: exercises_details.reduce((s, it) => s + Number(it.weight_kg || 0), 0)
       };
 
-      // Upsert daily plan by unique keys (user_id, plan_type, source_plan_id, plan_date, gym_id)
+      // Upsert daily plan by unique keys (user_id, plan_type, source_plan_id, day_number, gym_id)
       const existing = await db('daily_training_plans')
-        .where({ user_id: targetUserId, plan_type, source_plan_id: source_plan_id || null, plan_date })
+        .where({ user_id: targetUserId, plan_type, source_plan_id: source_plan_id || null, day_number: calculatedDayNumber })
         .modify((qb) => { if (gym_id != null) qb.andWhere({ gym_id }); })
         .first();
 
@@ -3383,7 +3009,7 @@ exports.storeDailyPlansFromMobile = async (req, res, next) => {
           .insert({
             user_id: targetUserId,
             gym_id,
-            plan_date,
+            day_number: calculatedDayNumber,
             plan_type,
             source_plan_id: source_plan_id || null,
           plan_category,
@@ -3409,7 +3035,7 @@ exports.storeDailyPlansFromMobile = async (req, res, next) => {
 // Create daily plans from training approval on-demand (for mobile app)
 exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
   try {
-    const { approval_id, plan_date, web_plan_id, assignment_id } = req.body;
+    const { approval_id, day_number, web_plan_id, assignment_id } = req.body;
     const user_id = req.user.id;
     const gym_id = req.user.gym_id;
 
@@ -3423,13 +3049,23 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
       });
     }
     
+    // day_number is required
+    const targetDayNumber = day_number ? Number(day_number) : null;
+    
+    if (!targetDayNumber || targetDayNumber < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'day_number is required and must be a positive integer'
+      });
+    }
+    
     console.log('🔍 Creating daily plan from approval/assignment:', {
       searchId,
       approval_id,
       web_plan_id,
       assignment_id,
       user_id,
-      plan_date
+      day_number: targetDayNumber
     });
 
     // Get training approval/assignment - try multiple lookup strategies
@@ -3727,29 +3363,23 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
       } catch (_) {}
     }
 
-    // Generate daily plan for specific date or use distribution
-    const targetDate = plan_date || new Date().toISOString().split('T')[0];
+    // Use day_number (required)
+    const calculatedDayNumber = targetDayNumber;
     
-    // Normalize target date to YYYY-MM-DD format
-    const normalizeDate = (dateStr) => {
-      try {
-        const d = new Date(dateStr);
-        return d.toISOString().split('T')[0];
-      } catch (e) {
-        return dateStr;
-      }
-    };
-    const normalizedTargetDate = normalizeDate(targetDate);
+    // Calculate normalizedTargetDate from day_number and start_date for date range validation
+    const approvalStartDate = new Date(approval.start_date);
+    const targetDateObj = new Date(approvalStartDate);
+    targetDateObj.setDate(approvalStartDate.getDate() + (calculatedDayNumber - 1));
+    const normalizedTargetDate = normalizeDate(targetDateObj.toISOString().split('T')[0]);
     
     let exercisesForDate = [];
     
     // Check if target date is within assignment/approval date range
-    const startDate = new Date(approval.start_date);
     const endDate = new Date(approval.end_date);
-    const targetDateObj = new Date(normalizedTargetDate);
+    const targetDateObjForRange = new Date(normalizedTargetDate);
     
     // Check if date is within range
-    if (targetDateObj < startDate || targetDateObj > endDate) {
+    if (targetDateObjForRange < approvalStartDate || targetDateObjForRange > endDate) {
       console.warn('⚠️ Target date is outside assignment date range:', {
         targetDate: normalizedTargetDate,
         startDate: approval.start_date,
@@ -3758,19 +3388,24 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
     }
     
     if (Array.isArray(dailyPlansSource) && dailyPlansSource.length > 0) {
-      // Find the plan for this date - try multiple date formats
-      let planForDate = dailyPlansSource.find(p => {
-        const planDate = normalizeDate(p.date);
-        return planDate === normalizedTargetDate;
-      });
+      // Find the plan by day_number (array index = day_number - 1, since day_number is 1-indexed)
+      // First try to find by day_number property if it exists
+      let planForDate = dailyPlansSource.find(p => p.day_number === calculatedDayNumber || p.day === calculatedDayNumber);
       
-      // If not found, try finding by day index (if workouts array exists)
+      // If not found by day_number property, use array index (day_number - 1)
       if (!planForDate) {
-        // Try to find by calculating day index
-        const dayIndex = Math.floor((targetDateObj - startDate) / (1000 * 60 * 60 * 24));
+        const dayIndex = calculatedDayNumber - 1; // day_number is 1-indexed, arrays are 0-indexed
         if (dayIndex >= 0 && dayIndex < dailyPlansSource.length) {
           planForDate = dailyPlansSource[dayIndex];
         }
+      }
+      
+      // Fallback: try finding by date if day_number/index lookup failed (for backward compatibility)
+      if (!planForDate) {
+        planForDate = dailyPlansSource.find(p => {
+          const planDate = normalizeDate(p.date);
+          return planDate === normalizedTargetDate;
+        });
       }
       
       if (planForDate) {
@@ -3790,18 +3425,24 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
       const { createDistributedPlan } = require('../utils/exerciseDistribution');
       const distributed = createDistributedPlan({ items }, startDate, endDate);
       
-      // Find exercises for target date - try multiple date formats
-      let planForDate = distributed.daily_plans.find(p => {
-        const planDate = normalizeDate(p.date);
-        return planDate === normalizedTargetDate;
-      });
+      // Find exercises by day_number (array index = day_number - 1, since day_number is 1-indexed)
+      // First try to find by day_number property if it exists
+      let planForDate = distributed.daily_plans.find(p => p.day_number === calculatedDayNumber || p.day === calculatedDayNumber);
       
-      // If not found by exact date match, try by day index
+      // If not found by day_number property, use array index (day_number - 1)
       if (!planForDate) {
-        const dayIndex = Math.floor((targetDateObj - startDate) / (1000 * 60 * 60 * 24));
+        const dayIndex = calculatedDayNumber - 1; // day_number is 1-indexed, arrays are 0-indexed
         if (dayIndex >= 0 && dayIndex < distributed.daily_plans.length) {
           planForDate = distributed.daily_plans[dayIndex];
         }
+      }
+      
+      // Fallback: try finding by date if day_number/index lookup failed (for backward compatibility)
+      if (!planForDate) {
+        planForDate = distributed.daily_plans.find(p => {
+          const planDate = normalizeDate(p.date);
+          return planDate === normalizedTargetDate;
+        });
       }
       
       if (planForDate) {
@@ -3889,15 +3530,18 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
     
     console.log(`📊 createDailyPlanFromApproval - Final determined plan_type: ${determinedPlanType} for approval/assignment ${actualApprovalId}`);
     
-    // CRITICAL: Use normalizedTargetDate for query to ensure correct date matching
+    // CRITICAL: Use day_number (required parameter)
+    // Day 1 = start_date (dayIndex 0), Day 2 = start_date + 1 day (dayIndex 1), etc.
+    
+    // CRITICAL: Use day_number for query to ensure correct day matching
     // This prevents finding Day 1's plan when looking for Day 2's plan
-    // IMPORTANT: Check using the unique constraint fields (user_id, plan_date, plan_type, source_plan_id)
+    // IMPORTANT: Check using the unique constraint fields (user_id, day_number, plan_type, source_plan_id)
     // The unique constraint now includes source_plan_id to allow multiple plans of the same type
-    // on the same date from different assignments (e.g., 2 "web_assigned" plans from different assignments)
+    // on the same day_number from different assignments
     const existing = await db('daily_training_plans')
       .where({
         user_id: user_id,
-        plan_date: normalizedTargetDate, // Use normalized date, not raw targetDate
+        day_number: calculatedDayNumber,
         plan_type: determinedPlanType, // Check by plan_type (part of unique constraint)
         source_plan_id: actualApprovalId, // CRITICAL: Include source_plan_id to find the correct plan
         is_stats_record: false
@@ -3909,21 +3553,11 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
     let shouldCreateNew = false;
     
     if (existing) {
-      // CRITICAL: Verify the existing plan's date matches the requested date
+      // CRITICAL: Verify the existing plan's day_number matches the requested day_number
       // This prevents returning Day 1's plan when Day 2 is requested
-      let existingPlanDateStr;
-      if (existing.plan_date instanceof Date) {
-        const d = existing.plan_date;
-        existingPlanDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      } else if (typeof existing.plan_date === 'string') {
-        existingPlanDateStr = existing.plan_date.split('T')[0];
-      } else {
-        existingPlanDateStr = new Date(existing.plan_date).toISOString().split('T')[0];
-      }
-      
-      if (existingPlanDateStr !== normalizedTargetDate) {
-        console.error(`❌ CRITICAL: Existing plan ${existing.id} has date ${existingPlanDateStr} but requested date is ${normalizedTargetDate}. This is a date mismatch - will create new plan instead.`);
-        // Don't use the existing plan if dates don't match - create a new one
+      if (existing.day_number !== calculatedDayNumber) {
+        console.error(`❌ CRITICAL: Existing plan ${existing.id} has day_number ${existing.day_number} but requested day_number is ${calculatedDayNumber}. This is a day mismatch - will create new plan instead.`);
+        // Don't use the existing plan if day_numbers don't match - create a new one
         shouldCreateNew = true;
       } else {
         // Update existing plan (also update source_plan_id and exercises if needed)
@@ -3938,19 +3572,19 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
           })
           .returning('*');
         dailyPlan = updated;
-        console.log(`✅ Updated existing daily plan ${updated.id} (date: ${normalizedTargetDate}, plan_type: ${determinedPlanType})`);
+        console.log(`✅ Updated existing daily plan ${updated.id} (day_number: ${calculatedDayNumber}, plan_type: ${determinedPlanType})`);
       }
     }
     
     if (!existing || shouldCreateNew || !dailyPlan) {
-      // Create new daily plan with normalized date
+      // Create new daily plan with day_number
       // Wrap in try-catch to handle duplicate key errors gracefully
       try {
         const [inserted] = await db('daily_training_plans')
           .insert({
             user_id: user_id,
             gym_id: gym_id,
-            plan_date: normalizedTargetDate, // Use normalized date to ensure correct date storage
+            day_number: calculatedDayNumber,
             plan_type: determinedPlanType, // Use determined plan_type
             source_plan_id: actualApprovalId,
             plan_category: approval.exercise_plan_category || approval.category || 'General',
@@ -3960,20 +3594,20 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
           })
           .returning('*');
         dailyPlan = inserted;
-        console.log(`✅ Created daily plan ${inserted.id} (date: ${normalizedTargetDate}) with plan_type: ${determinedPlanType}`);
+        console.log(`✅ Created daily plan ${inserted.id} (day_number: ${inserted.day_number || 'N/A'}) with plan_type: ${determinedPlanType}`);
       } catch (insertErr) {
         // Handle duplicate key constraint violation
-        // The unique constraint is now: (user_id, plan_date, plan_type, source_plan_id)
-        // This allows multiple plans of the same type on the same date from different assignments
+        // The unique constraint is now: (user_id, day_number, plan_type, source_plan_id)
+        // This allows multiple plans of the same type on the same day_number from different assignments
         if (insertErr.code === '23505' && insertErr.constraint === 'daily_training_plans_user_plan_unique') {
-          console.log(`⚠️ Duplicate key detected - plan already exists for (user_id: ${user_id}, plan_date: ${normalizedTargetDate}, plan_type: ${determinedPlanType}, source_plan_id: ${actualApprovalId}). Fetching existing plan...`);
+          console.log(`⚠️ Duplicate key detected - plan already exists for (user_id: ${user_id}, day_number: ${calculatedDayNumber}, plan_type: ${determinedPlanType}, source_plan_id: ${actualApprovalId}). Fetching existing plan...`);
           
           // Fetch the existing plan that caused the conflict
           // Must match all unique constraint fields including source_plan_id
           const existingPlan = await db('daily_training_plans')
             .where({
               user_id: user_id,
-              plan_date: normalizedTargetDate,
+              day_number: calculatedDayNumber,
               plan_type: determinedPlanType,
               source_plan_id: actualApprovalId, // CRITICAL: Include source_plan_id to find the correct plan
               is_stats_record: false
@@ -3994,7 +3628,7 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
               })
               .returning('*');
             dailyPlan = updated;
-            console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (date: ${normalizedTargetDate}, plan_type: ${determinedPlanType})`);
+            console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (day_number: ${calculatedDayNumber}, plan_type: ${determinedPlanType})`);
           } else {
             // This shouldn't happen, but handle it gracefully
             console.error(`❌ CRITICAL: Duplicate key error but couldn't find existing plan!`, insertErr);
@@ -4007,30 +3641,22 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
       }
     }
     
-    // CRITICAL: Verify the returned plan's date matches the requested date
+    // CRITICAL: Verify the returned plan's day_number matches the requested day_number
     // This is a final safety check to prevent returning the wrong plan
-    let returnedPlanDateStr;
-    if (dailyPlan.plan_date instanceof Date) {
-      const d = dailyPlan.plan_date;
-      returnedPlanDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    } else if (typeof dailyPlan.plan_date === 'string') {
-      returnedPlanDateStr = dailyPlan.plan_date.split('T')[0];
-    } else {
-      returnedPlanDateStr = new Date(dailyPlan.plan_date).toISOString().split('T')[0];
-    }
+    const returnedDayNumber = dailyPlan.day_number != null ? Number(dailyPlan.day_number) : null;
     
-    if (returnedPlanDateStr !== normalizedTargetDate) {
-      console.error(`❌ CRITICAL ERROR: Returned plan ${dailyPlan.id} has date ${returnedPlanDateStr} but requested date is ${normalizedTargetDate}! This is a serious bug.`);
+    if (returnedDayNumber !== calculatedDayNumber) {
+      console.error(`❌ CRITICAL ERROR: Returned plan ${dailyPlan.id} has day_number ${returnedDayNumber} but requested day_number is ${calculatedDayNumber}! This is a serious bug.`);
       return res.status(500).json({
         success: false,
-        message: `Date mismatch error: Created plan has date ${returnedPlanDateStr} but requested date is ${normalizedTargetDate}. Please try again.`,
-        error: 'DATE_MISMATCH',
-        requested_date: normalizedTargetDate,
-        returned_date: returnedPlanDateStr
+        message: `Day number mismatch error: Created plan has day_number ${returnedDayNumber} but requested day_number is ${calculatedDayNumber}. Please try again.`,
+        error: 'DAY_NUMBER_MISMATCH',
+        requested_day_number: calculatedDayNumber,
+        returned_day_number: returnedDayNumber
       });
     }
     
-    console.log(`✅ Verified returned plan ${dailyPlan.id} has correct date: ${returnedPlanDateStr} (matches requested: ${normalizedTargetDate})`);
+    console.log(`✅ Verified returned plan ${dailyPlan.id} has correct day_number: ${returnedDayNumber} (matches requested: ${calculatedDayNumber})`);
 
     // Parse exercises_details for response
     let exercises = [];
@@ -4063,19 +3689,17 @@ exports.createDailyPlansFromTrainingApproval = async (req, res, next) => {
   }
 };
 
-// Find daily plan by source (assignment/approval) and date (for mobile app)
+// Find daily plan by source (assignment/approval) and day_number (for mobile app)
 exports.findDailyPlanBySource = async (req, res, next) => {
   try {
-    const { assignment_id, approval_id, web_plan_id, plan_date, source_plan_id } = req.query;
+    const { assignment_id, approval_id, web_plan_id, day_number, source_plan_id } = req.query;
     const user_id = req.user.id;
     const gym_id = req.user.gym_id;
 
     // Support multiple ways to find the source
     const searchId = assignment_id || approval_id || web_plan_id || source_plan_id;
-    // Use provided plan_date or default to today
-    const targetDate = plan_date || new Date().toISOString().split('T')[0];
 
-    // Validate that searchId is provided (targetDate always has a value due to default)
+    // Validate that searchId is provided
     if (!searchId) {
       return res.status(400).json({
         success: false,
@@ -4083,89 +3707,34 @@ exports.findDailyPlanBySource = async (req, res, next) => {
       });
     }
 
-    // Normalize date
-    const normalizeDate = (dateStr) => {
-      try {
-        const d = new Date(dateStr);
-        return d.toISOString().split('T')[0];
-      } catch (e) {
-        return dateStr;
-      }
-    };
-    const normalizedDate = normalizeDate(targetDate);
+    // day_number is required
+    const targetDayNumber = day_number ? Number(day_number) : null;
+    
+    if (!targetDayNumber || targetDayNumber < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'day_number is required and must be a positive integer'
+      });
+    }
 
-    // Find daily plan by source_plan_id and date
+    // Find daily plan by source_plan_id and day_number
     let dailyPlan = await db('daily_training_plans')
       .where({
         user_id: user_id,
-        plan_date: normalizedDate,
+        day_number: targetDayNumber,
         source_plan_id: searchId,
         is_stats_record: false
       })
       .modify((qb) => { if (gym_id != null) qb.andWhere({ gym_id }); })
       .first();
 
-    // If not found by source_plan_id, try to find by matching assignment/approval/manual plan
-    if (!dailyPlan) {
-      // Try to find assignment first
-      const assignment = await db('training_plan_assignments')
-        .where({ id: searchId, user_id: user_id })
-        .orWhere({ web_plan_id: searchId, user_id: user_id })
-        .first();
-
-      if (assignment) {
-        dailyPlan = await db('daily_training_plans')
-          .where({
-            user_id: user_id,
-            plan_date: normalizedDate,
-            source_plan_id: assignment.id.toString(),
-            is_stats_record: false
-          })
-          .modify((qb) => { if (gym_id != null) qb.andWhere({ gym_id }); })
-          .first();
-      }
-
-      // Try to find approval
-      if (!dailyPlan) {
-        const approval = await db('training_approvals')
-          .where({ id: searchId, user_id: user_id })
-          .orWhere({ plan_id: searchId, user_id: user_id })
-          .first();
-
-        if (approval) {
-          dailyPlan = await db('daily_training_plans')
-            .where({
-              user_id: user_id,
-              plan_date: normalizedDate,
-              source_plan_id: approval.id.toString(),
-              is_stats_record: false
-            })
-            .modify((qb) => { if (gym_id != null) qb.andWhere({ gym_id }); })
-            .first();
-        }
-      }
-
-      // Try to find manual plan (for manual plans, source_plan_id is the plan_id)
+    // If not found, try to sync daily plans from manual plan (for manual plans only)
       if (!dailyPlan) {
         const manualPlan = await db('app_manual_training_plans')
           .where({ id: searchId, user_id: user_id })
           .first();
 
-        if (manualPlan) {
-          // For manual plans, source_plan_id is stored as the plan_id (string)
-          dailyPlan = await db('daily_training_plans')
-            .where({
-              user_id: user_id,
-              plan_date: normalizedDate,
-              source_plan_id: manualPlan.id.toString(),
-              plan_type: 'manual',
-              is_stats_record: false
-            })
-            .modify((qb) => { if (gym_id != null) qb.andWhere({ gym_id }); })
-            .first();
-          
-          // If still not found, try to sync daily plans from manual plan
-          if (!dailyPlan && manualPlan.daily_plans) {
+      if (manualPlan && manualPlan.daily_plans) {
             console.log(`🔄 Daily plan not found for manual plan ${searchId}, attempting to sync...`);
             try {
               const { syncDailyPlansFromManualPlanHelper } = require('./DailyTrainingController');
@@ -4175,7 +3744,7 @@ exports.findDailyPlanBySource = async (req, res, next) => {
               dailyPlan = await db('daily_training_plans')
                 .where({
                   user_id: user_id,
-                  plan_date: normalizedDate,
+              day_number: targetDayNumber,
                   source_plan_id: manualPlan.id.toString(),
                   plan_type: 'manual',
                   is_stats_record: false
@@ -4184,28 +3753,6 @@ exports.findDailyPlanBySource = async (req, res, next) => {
                 .first();
             } catch (syncError) {
               console.error('❌ Error syncing daily plans from manual plan:', syncError);
-            }
-          }
-        }
-      }
-
-      // Try to find AI plan
-      if (!dailyPlan) {
-        const aiPlan = await db('app_ai_generated_plans')
-          .where({ id: searchId, user_id: user_id })
-          .first();
-
-        if (aiPlan) {
-          dailyPlan = await db('daily_training_plans')
-            .where({
-              user_id: user_id,
-              plan_date: normalizedDate,
-              source_plan_id: aiPlan.id.toString(),
-              plan_type: 'ai_generated',
-              is_stats_record: false
-            })
-            .modify((qb) => { if (gym_id != null) qb.andWhere({ gym_id }); })
-            .first();
         }
       }
     }
@@ -4213,7 +3760,7 @@ exports.findDailyPlanBySource = async (req, res, next) => {
     if (!dailyPlan) {
       return res.status(404).json({
         success: false,
-        message: `Daily plan not found for source ${searchId} on date ${normalizedDate}. Use /mobile/plans/create-from-approval to create it.`
+        message: `Daily plan not found for source ${searchId} on Day ${targetDayNumber}. Use /mobile/plans/create-from-approval to create it.`
       });
     }
 
@@ -4267,23 +3814,14 @@ exports.findDailyPlanBySource = async (req, res, next) => {
           })
           .whereNotNull('completed_at')
           .modify((qb) => { if (gym_id != null) qb.andWhere({ gym_id }); })
-          .orderBy('plan_date', 'desc')
+          .orderBy('day_number', 'desc')
           .first();
         
-        let searchDate = normalizedDate;
-        if (lastCompletedPlan && lastCompletedPlan.plan_date) {
-          // Use the last completed day's date as the starting point
-          let lastCompletedDateStr;
-          if (lastCompletedPlan.plan_date instanceof Date) {
-            const d = lastCompletedPlan.plan_date;
-            lastCompletedDateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          } else if (typeof lastCompletedPlan.plan_date === 'string') {
-            lastCompletedDateStr = lastCompletedPlan.plan_date.split('T')[0];
-          } else {
-            lastCompletedDateStr = new Date(lastCompletedPlan.plan_date).toISOString().split('T')[0];
-          }
-          searchDate = lastCompletedDateStr;
-          console.log(`📅 Found last completed day: ${lastCompletedDateStr}, searching for next incomplete day after this date`);
+        let searchDayNumber = targetDayNumber;
+        if (lastCompletedPlan && lastCompletedPlan.day_number != null) {
+          // Use the last completed day's day_number as the starting point
+          searchDayNumber = lastCompletedPlan.day_number;
+          console.log(`📅 Found last completed day: Day ${searchDayNumber}, searching for next incomplete day after this day`);
         }
         
         let nextIncompleteQuery = db('daily_training_plans')
@@ -4294,25 +3832,20 @@ exports.findDailyPlanBySource = async (req, res, next) => {
           })
           .andWhere('source_plan_id', dailyPlan.source_plan_id)
           .andWhere('is_completed', false)
-          .andWhere('plan_date', '>', searchDate); // Use searchDate (last completed day) instead of normalizedDate
-        
-        // CRITICAL: Only consider plans on/after assignment start_date
-        if (assignmentStartDate) {
-          nextIncompleteQuery = nextIncompleteQuery.andWhere('plan_date', '>=', assignmentStartDate);
-        }
+          .andWhere('day_number', '>', searchDayNumber || 0); // Use searchDayNumber (last completed day) instead of targetDayNumber
         
         nextIncompleteQuery = nextIncompleteQuery
           .modify((qb) => { if (gym_id != null) qb.andWhere({ gym_id }); })
-          .orderBy('plan_date', 'asc')
+          .orderBy('day_number', 'asc')
           .first();
         
         const nextIncomplete = await nextIncompleteQuery;
 
         if (nextIncomplete) {
-          console.log(`📅 Requested completed day ${normalizedDate} for source ${searchId}; returning next incomplete day ${nextIncomplete.plan_date} instead (last completed: ${searchDate}, assignment_start: ${assignmentStartDate || 'N/A'}).`);
+          console.log(`📅 Requested completed day for source ${searchId}; returning next incomplete day (Day ${nextIncomplete.day_number || 'N/A'}) instead (last completed: Day ${searchDayNumber || 'N/A'}).`);
           dailyPlan = nextIncomplete;
         } else {
-          console.log(`📅 No next incomplete day found for source ${searchId} after ${searchDate} (assignment_start: ${assignmentStartDate || 'N/A'})`);
+          console.log(`📅 No next incomplete day found for source ${searchId} after Day ${searchDayNumber || 'N/A'}`);
         }
       } catch (advanceErr) {
         console.error('⚠️ Error finding next incomplete daily plan, falling back to requested completed day:', advanceErr);
@@ -4433,48 +3966,33 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
     const expectedDays = dailyPlans.length;
     console.log(`📊 Expected days in plan: ${expectedDays} (Day 1 to Day ${expectedDays})`);
     
-    // IMPORTANT: Check last completed date and start from next day
-    // Find the last completed daily plan for this assignment (by plan_date, not completed_at)
-    // This ensures we skip days that are already completed and start from the next day
-    const lastCompletedPlan = await db('daily_training_plans')
+    // CRITICAL: Check if this is first creation or a sync (matching manual plan behavior)
+    // Manual plans: create ALL days upfront initially, then skip completed days on sync
+    // Assigned plans should do the same: create ALL days on first creation, skip completed days on sync
+    // IMPORTANT: Check for ANY existing plans (completed or not) to determine if this is first creation
+    const existingPlansCount = await db('daily_training_plans')
       .where({
         user_id: assignment.user_id,
-        is_stats_record: false,
-        is_completed: true
-      })
-      .whereNotNull('completed_at')
-      .whereNotNull('plan_date')
-      .whereIn('plan_type', ['web_assigned', 'web_assigne'])
-      .where(function() {
-        // Match both string and integer versions of source_plan_id
-        this.where('source_plan_id', assignment.id)
-            .orWhere('source_plan_id', assignment.id.toString());
+        source_plan_id: assignment.id.toString(),
+        is_stats_record: false
       })
       .modify((qb) => { 
         if (assignment.gym_id != null) {
           qb.andWhere({ gym_id: assignment.gym_id });
         }
       })
-      .orderBy('plan_date', 'desc')
+      .count('* as count')
       .first();
     
-    let lastCompletedDate = null;
-    if (lastCompletedPlan && lastCompletedPlan.plan_date) {
-      // Use plan_date (the scheduled date) to determine which day was last completed
-      const planDate = new Date(lastCompletedPlan.plan_date);
-      planDate.setHours(0, 0, 0, 0);
-      const completedDateStr = planDate.toISOString().split('T')[0];
-      
-      // CRITICAL: Only use lastCompletedDate if it's on or after start_date
-      // This prevents old completed plans (before start_date) from blocking new plan creation
-      // We'll calculate startDateStr below, but for now just store the completed date
-      lastCompletedDate = completedDateStr;
-      console.log(`📅 Last completed day for assignment ${assignmentId}: ${lastCompletedDate} (plan_date from plan ${lastCompletedPlan.id})`);
+    const isFirstCreation = !existingPlansCount || parseInt(existingPlansCount.count) === 0;
+    
+    if (isFirstCreation) {
+      console.log(`📅 First creation for assignment ${assignmentId} - will create ALL days (matching manual plan behavior)`);
     } else {
-      console.log(`📅 No completed plans found for assignment ${assignmentId}, will start from first day`);
+      console.log(`📅 Sync for assignment ${assignmentId} - found ${existingPlansCount.count} existing plan(s), will skip completed days`);
     }
     
-    // IMPORTANT: Recalculate dates based on assignment's start_date
+    // IMPORTANT: Recalculate dates based on assignment's start_date FIRST
     // The daily_plans from the plan may have dates relative to the plan's start_date,
     // but we need dates relative to the assignment's start_date (which should be the same, but recalculate to be safe)
     // Parse start_date and normalize to LOCAL date-only (YYYY-MM-DD) to avoid timezone shifting backwards
@@ -4489,6 +4007,43 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
     } else {
       // If it's a string from DB, it should already be in YYYY-MM-DD or ISO format
       startDateStr = assignment.start_date.split('T')[0];
+    }
+    
+    // IMPORTANT: Check last completed day_number and start from next day (only on sync, not first creation)
+    // Find the last completed daily plan for this assignment (by day_number)
+    // This ensures we skip days that are already completed and start from the next day
+    let lastCompletedDayNumber = null;
+    if (!isFirstCreation) {
+      // Only check for completed plans on sync (not first creation)
+      const lastCompletedPlan = await db('daily_training_plans')
+        .where({
+          user_id: assignment.user_id,
+          is_stats_record: false,
+          is_completed: true
+        })
+        .whereNotNull('completed_at')
+        .whereNotNull('day_number')
+        .whereIn('plan_type', ['web_assigned', 'web_assigne'])
+        .where(function() {
+          // Match both string and integer versions of source_plan_id
+          this.where('source_plan_id', assignment.id)
+              .orWhere('source_plan_id', assignment.id.toString());
+        })
+        .modify((qb) => { 
+          if (assignment.gym_id != null) {
+            qb.andWhere({ gym_id: assignment.gym_id });
+          }
+        })
+        .orderBy('day_number', 'desc')
+        .first();
+      
+      if (lastCompletedPlan && lastCompletedPlan.day_number != null) {
+        // Use day_number to determine which day was last completed
+        lastCompletedDayNumber = lastCompletedPlan.day_number;
+        console.log(`📅 Last completed day for assignment ${assignmentId}: Day ${lastCompletedDayNumber} (from plan ${lastCompletedPlan.id})`);
+        } else {
+        console.log(`📅 No completed plans found for assignment ${assignmentId}, will start from first day`);
+      }
     }
     
     const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
@@ -4531,62 +4086,12 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
       console.log(`✅ Fixed ${fixedPlanTypes} daily plan(s) with wrong plan_type to 'web_assigned' for assignment ${assignmentId}`);
     }
     
-    // CRITICAL: Delete any existing plans that are BEFORE start_date for this assignment
-    // This prevents date mismatches where old plans (e.g., 2025-12-01) exist when start_date is 2025-12-02
-    // We only delete plans BEFORE start_date, not plans on/after start_date (to preserve completed days)
-    // IMPORTANT: This also fixes cases where Day 1 was incorrectly created on start_date - 1 day due to timezone issues
-    const deletedBeforeStart = await db('daily_training_plans')
-      .where({
-        user_id: assignment.user_id,
-        source_plan_id: assignment.id.toString(),
-        is_stats_record: false
-      })
-      .where('plan_date', '<', startDateStr) // Only delete plans BEFORE start_date
-      .del();
+    // Note: With day_number, we don't need to delete plans "before start_date" since day_number
+    // is sequential and doesn't depend on dates. We only need to ensure day_number is correct.
     
-    if (deletedBeforeStart > 0) {
-      console.log(`🗑️ Deleted ${deletedBeforeStart} daily plan(s) that were before start_date (${startDateStr}) for assignment ${assignmentId}`);
-      console.log(`🗑️ This includes any plans incorrectly created on ${startDateStr} - 1 day due to timezone issues`);
-    }
-    
-    // CRITICAL: Delete any COMPLETED plans before start_date
-    // These are duplicate Day 1 plans that cause completion bugs:
-    // - User completes Day 1 on wrong date (2025-12-01) → is_completed=true
-    // - Then tries to complete Day 1 on correct date (2025-12-02) → system thinks Day 1 is already done
-    // - This prevents Day 2 from being completed because system thinks Day 1 is done on wrong date
-    // We MUST delete these duplicate completed plans to fix the issue
-    const duplicateCompletedPlansBeforeStart = await db('daily_training_plans')
-      .where({
-        user_id: assignment.user_id,
-        source_plan_id: assignment.id.toString(),
-        is_stats_record: false
-      })
-      .where('plan_date', '<', startDateStr)
-      .where(function() {
-        this.where('is_completed', true)
-          .orWhere('is_completed', 't')
-          .orWhere('is_completed', 1);
-      })
-      .whereNotNull('completed_at')
-      .select('id', 'plan_date', 'exercises_details', 'is_completed', 'completed_at');
-    
-    if (duplicateCompletedPlansBeforeStart.length > 0) {
-      console.warn(`⚠️ CRITICAL BUG DETECTED: Found ${duplicateCompletedPlansBeforeStart.length} COMPLETED plan(s) before start_date (${startDateStr})!`);
-      console.warn(`⚠️ These are duplicate Day 1 plans that cause completion bugs. They will be deleted.`);
-      
-      for (const duplicatePlan of duplicateCompletedPlansBeforeStart) {
-        console.warn(`⚠️ Deleting duplicate completed plan: id=${duplicatePlan.id}, plan_date=${duplicatePlan.plan_date}, is_completed=${duplicatePlan.is_completed}, completed_at=${duplicatePlan.completed_at}`);
-        await db('daily_training_plans')
-          .where({ id: duplicatePlan.id })
-          .del();
-      }
-      
-      console.log(`🗑️ Deleted ${duplicateCompletedPlansBeforeStart.length} duplicate completed plan(s) before start_date to fix completion bugs`);
-    }
-    
-    // CRITICAL: Also check if there's a plan on start_date that has the wrong workout (Day 2 workout instead of Day 1)
-    // This can happen if Day 1 was created on start_date - 1 day, and Day 2 was created on start_date
-    // We need to delete Day 2's plan from start_date and recreate it correctly
+    // CRITICAL: Also check if there's a plan with wrong day_number that has the wrong workout (Day 2 workout instead of Day 1)
+    // This can happen if plans were created with incorrect day_number sequencing
+    // We need to ensure each day_number has the correct workout from the assignment's daily_plans array
     // NOTE: This check will be done after sortedDailyPlans is defined below
     
     // IMPORTANT: We NO LONGER delete ALL existing daily plans for this assignment.
@@ -4594,9 +4099,8 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
     // to be reset back to incomplete whenever the mobile app re-synced the plan.
     // 
     // Instead, we:
-    // - Delete only plans BEFORE start_date (to fix date mismatches)
-    // - Keep all existing daily_training_plans rows on/after start_date
-    // - Skip any day whose plan_date is on/before lastCompletedDate (if it's before start_date)
+    // - Keep all existing daily_training_plans rows (day_number-based, no date dependencies)
+    // - Skip any day whose day_number is <= lastCompletedDayNumber (already completed)
     // - Only create NEW rows for future days that don't exist yet
     // - If we update an existing future day, we preserve its completion status
     
@@ -4622,53 +4126,8 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
       console.warn(`⚠️ WARNING: sortedDailyPlans.length (${sortedDailyPlans.length}) does not match expectedDays (${expectedDays})`);
     }
     
-    // CRITICAL: Check if there's a plan on start_date that has the wrong workout (Day 2 workout instead of Day 1)
-    // This can happen if Day 1 was created on start_date - 1 day due to timezone issues, and Day 2 was created on start_date
-    // We need to delete the incorrectly dated plan from start_date and recreate it correctly
-    if (sortedDailyPlans.length > 0 && sortedDailyPlans[0]) {
-      const existingPlanOnStartDate = await db('daily_training_plans')
-        .where({
-          user_id: assignment.user_id,
-          source_plan_id: assignment.id.toString(),
-          plan_date: startDateStr,
-          is_stats_record: false
-        })
-        .first();
-      
-      if (existingPlanOnStartDate) {
-        const day1Workout = sortedDailyPlans[0];
-        let day1WorkoutName = null;
-        if (Array.isArray(day1Workout.workouts) && day1Workout.workouts.length > 0) {
-          day1WorkoutName = day1Workout.workouts[0].name || day1Workout.workouts[0].workout_name;
-        } else if (Array.isArray(day1Workout.exercises) && day1Workout.exercises.length > 0) {
-          day1WorkoutName = day1Workout.exercises[0].name || day1Workout.exercises[0].workout_name;
-        }
-        
-        if (day1WorkoutName) {
-          let existingPlanWorkoutName = null;
-          try {
-            const existingDetails = typeof existingPlanOnStartDate.exercises_details === 'string' 
-              ? JSON.parse(existingPlanOnStartDate.exercises_details) 
-              : existingPlanOnStartDate.exercises_details;
-            if (Array.isArray(existingDetails) && existingDetails.length > 0) {
-              existingPlanWorkoutName = existingDetails[0].name || existingDetails[0].workout_name;
-            }
-          } catch (e) {
-            // Ignore parse errors
-          }
-          
-          // If the existing plan on start_date has a different workout than Day 1's workout,
-          // it means Day 1 was created on the wrong date. Delete it and recreate correctly.
-          if (existingPlanWorkoutName && existingPlanWorkoutName !== day1WorkoutName) {
-            console.warn(`⚠️ WARNING: Plan on start_date (${startDateStr}) has workout "${existingPlanWorkoutName}" but Day 1 should have "${day1WorkoutName}". This indicates Day 1 was created on wrong date. Will delete and recreate.`);
-            await db('daily_training_plans')
-              .where({ id: existingPlanOnStartDate.id })
-              .del();
-            console.log(`🗑️ Deleted incorrectly dated plan ${existingPlanOnStartDate.id} from start_date ${startDateStr}`);
-          }
-        }
-      }
-    }
+    // Note: With day_number, we don't need to check for plans on start_date since day_number
+    // is sequential and doesn't depend on dates. We just check by day_number.
     
     // Process each daily plan - recalculate dates based on assignment start_date
     // IMPORTANT: We IGNORE the dates in daily_plans and always recalculate from start_date
@@ -4690,62 +4149,20 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
           continue;
         }
         
-        // CRITICAL: Recalculate date based on assignment's start_date and day number
-        // Day 1 = start_date + 0 days (no offset) - MUST match start_date exactly
-        // Day 2 = start_date + 1 day
-        // Day 3 = start_date + 2 days
-        // etc.
-        // Use LOCAL date calculation to avoid timezone shifting backwards
-        // Example: If start_date is 2025-12-02, Day 1 MUST be 2025-12-02, not 2025-12-01
-        const dayOffset = dayNumber - 1; // Day 1 = offset 0, Day 2 = offset 1, Day 3 = offset 2, etc.
+        console.log(`📅 Day ${dayNumber} calculation: isFirstCreation=${isFirstCreation}, lastCompletedDayNumber=${lastCompletedDayNumber || 'none'}`);
         
-        // CRITICAL: Use LOCAL date components from startDateStr (not UTC)
-        // startDateStr is already in YYYY-MM-DD format from LOCAL date components
-        // Parse it directly to avoid any timezone conversion
-        const [startYearLocal, startMonthLocal, startDayLocal] = startDateStr.split('-').map(Number);
-        
-        // Create a LOCAL date object (not UTC) for the start date
-        const startDateLocal = new Date(startYearLocal, startMonthLocal - 1, startDayLocal, 0, 0, 0, 0);
-        
-        // Add dayOffset days to get the plan date (still in LOCAL timezone)
-        const planDateLocal = new Date(startDateLocal);
-        planDateLocal.setDate(startDateLocal.getDate() + dayOffset);
-        
-        // Format as YYYY-MM-DD string using LOCAL date components (not UTC)
-        // This ensures Day 1 = start_date exactly, with no timezone shifts
-        const year = planDateLocal.getFullYear(); // LOCAL year
-        const month = String(planDateLocal.getMonth() + 1).padStart(2, '0'); // LOCAL month
-        const day = String(planDateLocal.getDate()).padStart(2, '0'); // LOCAL day
-        const planDateStr = `${year}-${month}-${day}`;
-        
-        console.log(`📅 Day ${dayNumber} calculation: start_date=${startDateStr}, dayOffset=${dayOffset}, calculated plan_date=${planDateStr}`);
-        
-        // Validate: plan_date must not be before start_date
-        if (planDateStr < startDateStr) {
-          console.error(`❌ ERROR: Calculated plan_date ${planDateStr} for Day ${dayNumber} is before start_date ${startDateStr}. Skipping.`);
+        // IMPORTANT: Skip days that are already completed (matching manual plan behavior)
+        // Only create/update plans for days AFTER the last completed day_number (on sync, not first creation)
+        // This ensures when you stop/start, it only creates the next incomplete day
+        // BUT: On first creation, create ALL days (no skip) - matching manual plan behavior
+        if (!isFirstCreation && lastCompletedDayNumber != null && dayNumber <= lastCompletedDayNumber) {
+          console.log(`⏭️ Skipping Day ${dayNumber} - already completed (last completed: Day ${lastCompletedDayNumber}, isFirstCreation: ${isFirstCreation})`);
           continue;
         }
         
-        // Validate: plan_date must not be after end_date
-        if (planDateStr > endDateStr) {
-          console.warn(`⚠️ Calculated plan_date ${planDateStr} for Day ${dayNumber} is after end_date ${endDateStr}. Skipping.`);
-          continue;
-        }
-        
-        // CRITICAL: Only skip days that are BEFORE the start_date
-        // DO NOT skip days that are ON or AFTER start_date
-        // This prevents creating plans before start_date (which causes date mismatches)
-        if (planDateStr < startDateStr) {
-          console.log(`⏭️ Skipping Day ${dayNumber} (${planDateStr}) - before start_date (${startDateStr})`);
-          continue;
-        }
-        
-        // CRITICAL: Only skip if this day is already completed AND it's on/after start_date
-        // This preserves completed days on/after start_date but allows creating new days after them
-        // DO NOT skip based on lastCompletedDate if it's before start_date (old plans from previous syncs)
-        if (lastCompletedDate && planDateStr <= lastCompletedDate && planDateStr >= startDateStr) {
-          console.log(`⏭️ Skipping Day ${dayNumber} (${planDateStr}) - already completed (last completed: ${lastCompletedDate}, start_date: ${startDateStr})`);
-          continue;
+        // CRITICAL DEBUG: Log if we're about to create Day 1, 2, or 3
+        if (dayNumber <= 3) {
+          console.log(`✅ Processing Day ${dayNumber} - will create/update (isFirstCreation: ${isFirstCreation}, lastCompletedDayNumber: ${lastCompletedDayNumber || 'none'})`);
         }
         
         // Extract exercises/workouts from dayPlan
@@ -4763,22 +4180,22 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
         
         // Log workout names for debugging
         const workoutNames = exercises.map(ex => ex.name || ex.workout_name || 'Unknown').join(', ');
-        console.log(`📅 Day ${dayNumber} (index ${index}, original day: ${dayPlan.day || 'N/A'}): Date ${planDateStr} (start_date: ${startDateStr} + ${dayOffset} days), Workouts: [${workoutNames}]`);
+        console.log(`📅 Day ${dayNumber} (index ${index}, original day: ${dayPlan.day || 'N/A'}): Workouts: [${workoutNames}]`);
         
         if (exercises.length === 0) {
-          console.warn(`⚠️ Daily plan for Day ${dayNumber} (date: ${planDateStr}) has no exercises, skipping`);
+          console.warn(`⚠️ Daily plan for Day ${dayNumber} has no exercises, skipping`);
           continue;
         }
         
-        // Check if a plan already exists for this date (shouldn't happen after deletion, but double-check)
+        // Check if a plan already exists for this day_number (shouldn't happen after deletion, but double-check)
         // IMPORTANT: Also check for plans with wrong plan_type (e.g., 'manual' instead of 'web_assigned')
         // This fixes existing plans that were created with incorrect plan_type
-        // CRITICAL: Always check for ANY plan with matching user_id, plan_date, and source_plan_id
+        // CRITICAL: Always check for ANY plan with matching user_id, day_number, and source_plan_id
         // regardless of plan_type, to catch plans that were incorrectly created with 'manual' type
         let existingPlan = await db('daily_training_plans')
           .where({
             user_id: assignment.user_id,
-            plan_date: planDateStr,
+            day_number: dayNumber,
             source_plan_id: assignment.id.toString(),
             is_stats_record: false
           })
@@ -4790,9 +4207,10 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
         }
         
         if (existingPlan) {
-          console.warn(`⚠️ Plan already exists for Day ${dayNumber} (date: ${planDateStr}), updating instead of creating`);
-          // Update existing plan details BUT PRESERVE its completion status.
-          // This keeps previously completed days completed even after a sync.
+          console.warn(`⚠️ Plan already exists for Day ${dayNumber}, updating instead of creating`);
+          // Update existing plan details (matching manual plan behavior)
+          // Manual plans: Update exercises_details, plan_category, user_level, updated_at
+          // Do NOT touch is_completed or completed_at (let them remain as-is, matching manual plan behavior)
           const [updated] = await db('daily_training_plans')
             .where({ id: existingPlan.id })
             .update({
@@ -4800,8 +4218,8 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
               plan_category: assignment.category || dayPlan.category || 'General',
               user_level: assignment.user_level || dayPlan.user_level || 'Beginner',
               plan_type: 'web_assigned', // Ensure plan_type is correct for assignments
-              is_completed: existingPlan.is_completed,   // preserve completion flag
-              completed_at: existingPlan.completed_at,   // preserve completion timestamp
+              // IMPORTANT: Do NOT update is_completed or completed_at (matching manual plan behavior)
+              // These fields remain unchanged, preserving completion status naturally
               updated_at: new Date()
             })
             .returning('*');
@@ -4810,7 +4228,8 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
             console.log(`✅ Fixed plan_type from '${existingPlan.plan_type}' to 'web_assigned' for plan ${updated.id}`);
           }
           
-          console.log(`✅ Updated existing daily plan ${updated.id} for Day ${dayNumber} (date: ${planDateStr}, workouts: [${workoutNames}], plan_type: web_assigned, is_completed: false)`);
+          const isCompleted = updated.is_completed === true || updated.is_completed === 't' || updated.is_completed === 1;
+          console.log(`✅ Updated existing daily plan ${updated.id} for Day ${dayNumber} (workouts: [${workoutNames}], plan_type: web_assigned, is_completed: ${isCompleted})`);
           createdOrUpdated.push(updated);
         } else {
           // Always create a fresh daily plan (we deleted all existing ones above)
@@ -4819,7 +4238,7 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
             const insertData = {
               user_id: assignment.user_id,
               gym_id: assignment.gym_id,
-              plan_date: planDateStr,  // Use recalculated date
+              day_number: dayNumber,
               plan_type: 'web_assigned',
               source_plan_id: assignment.id.toString(),
               plan_category: assignment.category || dayPlan.category || 'General',
@@ -4833,7 +4252,7 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
             console.log(`📝 Attempting to insert daily plan for Day ${dayNumber}:`, {
               user_id: insertData.user_id,
               gym_id: insertData.gym_id,
-              plan_date: insertData.plan_date,
+              day_number: insertData.day_number,
               plan_type: insertData.plan_type,
               source_plan_id: insertData.source_plan_id,
               exercises_count: exercises.length
@@ -4853,7 +4272,7 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
               throw new Error(`Failed to create daily plan for Day ${dayNumber} - insert returned no record`);
             }
             
-            console.log(`✅ Created fresh daily plan ${inserted.id} for Day ${dayNumber} (date: ${planDateStr}, workouts: [${workoutNames}], is_completed: false)`);
+            console.log(`✅ Created fresh daily plan ${inserted.id} for Day ${dayNumber} (workouts: [${workoutNames}], is_completed: false)`);
             
             // CRITICAL: Verify the plan was actually saved to the database
             const verification = await db('daily_training_plans')
@@ -4867,13 +4286,12 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
             
             createdOrUpdated.push(inserted);
           } catch (insertErr) {
-            console.error(`❌ CRITICAL ERROR inserting daily plan for Day ${dayNumber} (date: ${planDateStr}):`, {
+            console.error(`❌ CRITICAL ERROR inserting daily plan for Day ${dayNumber}:`, {
               error_message: insertErr.message,
               error_stack: insertErr.stack,
               error_code: insertErr.code,
               error_constraint: insertErr.constraint,
               day_number: dayNumber,
-              plan_date: planDateStr,
               user_id: assignment.user_id,
               gym_id: assignment.gym_id,
               source_plan_id: assignment.id.toString()
@@ -4892,7 +4310,6 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
           error_constraint: e.constraint,
           error_detail: e.detail,
           day_number: dayNumber,
-          plan_date: planDateStr,
           assignment_id: assignmentId,
           user_id: assignment?.user_id
         });
@@ -4916,16 +4333,16 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
       expected_days: expectedDays,
       created_count: createdOrUpdated.length,
       created_plan_ids: createdOrUpdated.map(p => p.id),
-      created_plan_dates: createdOrUpdated.map(p => p.plan_date),
+      created_plan_days: createdOrUpdated.map(p => p.day_number),
       first_plan: createdOrUpdated[0] ? {
         id: createdOrUpdated[0].id,
-        plan_date: createdOrUpdated[0].plan_date,
+        day_number: createdOrUpdated[0].day_number,
         plan_type: createdOrUpdated[0].plan_type,
         is_completed: createdOrUpdated[0].is_completed
       } : null,
       last_plan: createdOrUpdated[createdOrUpdated.length - 1] ? {
         id: createdOrUpdated[createdOrUpdated.length - 1].id,
-        plan_date: createdOrUpdated[createdOrUpdated.length - 1].plan_date,
+        day_number: createdOrUpdated[createdOrUpdated.length - 1].day_number,
         plan_type: createdOrUpdated[createdOrUpdated.length - 1].plan_type,
         is_completed: createdOrUpdated[createdOrUpdated.length - 1].is_completed
       } : null
@@ -4947,46 +4364,35 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
         source_plan_id: assignment.id.toString(),
         is_stats_record: false
       })
-      .select('id', 'plan_date', 'plan_type', 'is_completed')
-      .orderBy('plan_date', 'asc');
+      .select('id', 'day_number', 'plan_type', 'is_completed')
+      .orderBy('day_number', 'asc');
     
     console.log(`🔍 VERIFICATION: Found ${verificationQuery.length} plans in database for assignment ${assignmentId} after sync`);
     if (verificationQuery.length !== createdOrUpdated.length) {
       console.error(`❌ CRITICAL MISMATCH: Created ${createdOrUpdated.length} plans but database has ${verificationQuery.length} plans!`);
-      console.error(`❌ Database plans:`, verificationQuery.map(p => ({ id: p.id, plan_date: p.plan_date, plan_type: p.plan_type })));
+      console.error(`❌ Database plans:`, verificationQuery.map(p => ({ id: p.id, day_number: p.day_number, plan_type: p.plan_type })));
     } else {
       console.log(`✅ VERIFICATION PASSED: Database has ${verificationQuery.length} plans matching created count`);
     }
     
-    // CRITICAL: Update the daily_plans JSON in the assignment with correct dates
-    // This ensures the frontend sees the correct dates (Day 1 = start_date, not start_date + 1 day)
-    // The dates in daily_plans JSON were likely calculated incorrectly using toISOString()
-    // which converts to UTC and can shift dates by one day
+    // CRITICAL: Update the daily_plans JSON in the assignment with day_number
+    // Update the JSON to include day_number
+    // The date field is kept for backward compatibility but day_number is the primary identifier
     try {
       const updatedDailyPlans = sortedDailyPlans.map((dayPlan, index) => {
         const dayNumber = index + 1;
-        const dayOffset = dayNumber - 1;
         
-        // Recalculate date using LOCAL date components (same logic as above)
-        const [startYearLocal, startMonthLocal, startDayLocal] = startDateStr.split('-').map(Number);
-        const startDateLocal = new Date(startYearLocal, startMonthLocal - 1, startDayLocal, 0, 0, 0, 0);
-        const planDateLocal = new Date(startDateLocal);
-        planDateLocal.setDate(startDateLocal.getDate() + dayOffset);
-        
-        const year = planDateLocal.getFullYear();
-        const month = String(planDateLocal.getMonth() + 1).padStart(2, '0');
-        const day = String(planDateLocal.getDate()).padStart(2, '0');
-        const correctDate = `${year}-${month}-${day}`;
-        
-        // Update the date in the dayPlan object
+        // Update the dayPlan object with day_number
         return {
           ...dayPlan,
           day: dayNumber,
-          date: correctDate
+          day_number: dayNumber,
+          // Keep date for backward compatibility if it exists, but day_number is primary
+          date: dayPlan.date || null
         };
       });
       
-      // Update the assignment's daily_plans JSON with corrected dates
+      // Update the assignment's daily_plans JSON with day_number
       await db('training_plan_assignments')
         .where({ id: assignmentId })
         .update({
@@ -4994,7 +4400,7 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
           updated_at: new Date()
         });
       
-      console.log(`✅ Updated assignment ${assignmentId} daily_plans JSON with corrected dates (Day 1 = ${startDateStr})`);
+      console.log(`✅ Updated assignment ${assignmentId} daily_plans JSON with day_number (Day 1 to Day ${updatedDailyPlans.length})`);
     } catch (updateErr) {
       console.error(`⚠️ Failed to update assignment daily_plans JSON:`, updateErr?.message || updateErr);
       // Don't fail the sync if JSON update fails
@@ -5140,8 +4546,8 @@ async function syncDailyPlansFromManualPlanHelper(manualPlanId) {
     
     console.log(`📊 Found ${dailyPlans.length} daily plans in manual plan ${manualPlanId}`);
     
-    // IMPORTANT: Check last completed date and start from next day
-    // Find the last completed daily plan for this manual plan (by plan_date, not completed_at)
+    // IMPORTANT: Check last completed day_number and start from next day
+    // Find the last completed daily plan for this manual plan (by day_number, not completed_at)
     // This ensures we skip days that are already completed and start from the next day
     const lastCompletedPlan = await db('daily_training_plans')
       .where({
@@ -5152,42 +4558,32 @@ async function syncDailyPlansFromManualPlanHelper(manualPlanId) {
         is_completed: true
       })
       .whereNotNull('completed_at')
-      .whereNotNull('plan_date')
+      .whereNotNull('day_number')
       .modify((qb) => { 
         if (manualPlan.gym_id != null) {
           qb.andWhere({ gym_id: manualPlan.gym_id });
         }
       })
-      .orderBy('plan_date', 'desc')
+      .orderBy('day_number', 'desc')
       .first();
     
-    let lastCompletedDate = null;
-    if (lastCompletedPlan && lastCompletedPlan.plan_date) {
-      // Use plan_date (the scheduled date) to determine which day was last completed
-      const planDate = new Date(lastCompletedPlan.plan_date);
-      planDate.setHours(0, 0, 0, 0);
-      lastCompletedDate = planDate.toISOString().split('T')[0];
-      console.log(`📅 Last completed day for manual plan ${manualPlanId}: ${lastCompletedDate} (plan_date from plan ${lastCompletedPlan.id}), will start from next day`);
+    let lastCompletedDayNumber = null;
+    if (lastCompletedPlan && lastCompletedPlan.day_number != null) {
+      // Use day_number to determine which day was last completed
+      lastCompletedDayNumber = lastCompletedPlan.day_number;
+      console.log(`📅 Last completed day for manual plan ${manualPlanId}: Day ${lastCompletedDayNumber} (from plan ${lastCompletedPlan.id}), will start from next day`);
     } else {
       console.log(`📅 No completed plans found for manual plan ${manualPlanId}, will start from first day`);
     }
     
     const createdOrUpdated = [];
     
-    // Process each daily plan
-    for (const dayPlan of dailyPlans) {
+    // Process each daily plan (day_number is 1-indexed based on array position)
+    for (let index = 0; index < dailyPlans.length; index++) {
+      const dayPlan = dailyPlans[index];
+      const dayNumber = index + 1; // Day 1, Day 2, etc.
+      
       try {
-        // Extract date from dayPlan
-        let planDate = null;
-        if (dayPlan.date) {
-          planDate = new Date(dayPlan.date).toISOString().split('T')[0];
-        } else if (dayPlan.plan_date) {
-          planDate = new Date(dayPlan.plan_date).toISOString().split('T')[0];
-        } else {
-          console.warn(`⚠️ Daily plan missing date, skipping:`, dayPlan);
-          continue;
-        }
-        
         // Extract exercises/workouts from dayPlan
         let exercises = [];
         if (Array.isArray(dayPlan.workouts)) {
@@ -5201,14 +4597,14 @@ async function syncDailyPlansFromManualPlanHelper(manualPlanId) {
         }
         
         if (exercises.length === 0) {
-          console.warn(`⚠️ Daily plan for ${planDate} has no exercises, skipping`);
+          console.warn(`⚠️ Daily plan for Day ${dayNumber} has no exercises, skipping`);
           continue;
         }
         
-        // IMPORTANT: Skip days that are already completed (before or on lastCompletedDate)
-        // Only create/update plans for days AFTER the last completed date
-        if (lastCompletedDate && planDate <= lastCompletedDate) {
-          console.log(`⏭️ Skipping day ${planDate} - already completed (last completed: ${lastCompletedDate})`);
+        // IMPORTANT: Skip days that are already completed (before or on lastCompletedDayNumber)
+        // Only create/update plans for days AFTER the last completed day_number
+        if (lastCompletedDayNumber != null && dayNumber <= lastCompletedDayNumber) {
+          console.log(`⏭️ Skipping Day ${dayNumber} - already completed (last completed: Day ${lastCompletedDayNumber})`);
           continue;
         }
         
@@ -5216,7 +4612,7 @@ async function syncDailyPlansFromManualPlanHelper(manualPlanId) {
         const existing = await db('daily_training_plans')
           .where({
             user_id: manualPlan.user_id,
-            plan_date: planDate,
+            day_number: dayNumber,
             source_plan_id: manualPlan.id.toString(),
             plan_type: 'manual',
             is_stats_record: false
@@ -5241,7 +4637,7 @@ async function syncDailyPlansFromManualPlanHelper(manualPlanId) {
             })
             .returning('*');
           dailyPlan = updated;
-          console.log(`✅ Updated daily plan ${existing.id} for date ${planDate}`);
+          console.log(`✅ Updated daily plan ${existing.id} for Day ${dayNumber}`);
         } else {
           // Create new daily plan
           // Wrap in try-catch to handle duplicate key errors gracefully
@@ -5250,7 +4646,7 @@ async function syncDailyPlansFromManualPlanHelper(manualPlanId) {
               .insert({
                 user_id: manualPlan.user_id,
                 gym_id: manualPlan.gym_id,
-                plan_date: planDate,
+                day_number: dayNumber,
                 plan_type: 'manual',
                 source_plan_id: manualPlan.id.toString(),
                 plan_category: manualPlan.exercise_plan_category || dayPlan.category || 'General',
@@ -5260,18 +4656,18 @@ async function syncDailyPlansFromManualPlanHelper(manualPlanId) {
               })
               .returning('*');
             dailyPlan = inserted;
-            console.log(`✅ Created daily plan ${inserted.id} for date ${planDate}`);
+            console.log(`✅ Created daily plan ${inserted.id} (Day ${inserted.day_number || 'N/A'})`);
           } catch (insertErr) {
             // Handle duplicate key constraint violation
-            // The unique constraint is: (user_id, plan_date, plan_type, source_plan_id)
+            // The unique constraint is: (user_id, day_number, plan_type, source_plan_id)
             if (insertErr.code === '23505' && insertErr.constraint === 'daily_training_plans_user_plan_unique') {
-              console.log(`⚠️ Duplicate key detected - plan already exists for manual plan (user_id: ${manualPlan.user_id}, plan_date: ${planDate}, plan_type: manual, source_plan_id: ${manualPlan.id}). Fetching existing plan...`);
+              console.log(`⚠️ Duplicate key detected - plan already exists for manual plan (user_id: ${manualPlan.user_id}, day_number: ${dayNumber}, plan_type: manual, source_plan_id: ${manualPlan.id}). Fetching existing plan...`);
               
               // Fetch the existing plan that caused the conflict
               const existingPlan = await db('daily_training_plans')
                 .where({
                   user_id: manualPlan.user_id,
-                  plan_date: planDate,
+                  day_number: dayNumber,
                   plan_type: 'manual',
                   source_plan_id: manualPlan.id.toString(),
                   is_stats_record: false
@@ -5295,7 +4691,7 @@ async function syncDailyPlansFromManualPlanHelper(manualPlanId) {
                   })
                   .returning('*');
                 dailyPlan = updated;
-                console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (date: ${planDate}, plan_type: manual)`);
+                console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (day_number: ${dayNumber}, plan_type: manual)`);
               } else {
                 // This shouldn't happen, but handle it gracefully
                 console.error(`❌ CRITICAL: Duplicate key error but couldn't find existing plan!`, insertErr);
@@ -5428,20 +4824,12 @@ async function syncDailyPlansFromAIPlanHelper(aiPlanId) {
     
     const createdOrUpdated = [];
     
-    // Process each daily plan
-    for (const dayPlan of dailyPlans) {
+    // Process each daily plan (day_number is 1-indexed based on array position)
+    for (let index = 0; index < dailyPlans.length; index++) {
+      const dayPlan = dailyPlans[index];
+      const dayNumber = index + 1; // Day 1, Day 2, etc.
+      
       try {
-        // Extract date from dayPlan
-        let planDate = null;
-        if (dayPlan.date) {
-          planDate = new Date(dayPlan.date).toISOString().split('T')[0];
-        } else if (dayPlan.plan_date) {
-          planDate = new Date(dayPlan.plan_date).toISOString().split('T')[0];
-        } else {
-          console.warn(`⚠️ Daily plan missing date, skipping:`, dayPlan);
-          continue;
-        }
-        
         // Extract exercises/workouts from dayPlan
         let exercises = [];
         if (Array.isArray(dayPlan.workouts)) {
@@ -5455,7 +4843,7 @@ async function syncDailyPlansFromAIPlanHelper(aiPlanId) {
         }
         
         if (exercises.length === 0) {
-          console.warn(`⚠️ Daily plan for ${planDate} has no exercises, skipping`);
+          console.warn(`⚠️ Daily plan for Day ${dayNumber} has no exercises, skipping`);
           continue;
         }
         
@@ -5463,7 +4851,7 @@ async function syncDailyPlansFromAIPlanHelper(aiPlanId) {
         const existing = await db('daily_training_plans')
           .where({
             user_id: aiPlan.user_id,
-            plan_date: planDate,
+            day_number: dayNumber,
             source_plan_id: aiPlan.id.toString(),
             plan_type: 'ai_generated',
             is_stats_record: false
@@ -5488,7 +4876,7 @@ async function syncDailyPlansFromAIPlanHelper(aiPlanId) {
             })
             .returning('*');
           dailyPlan = updated;
-          console.log(`✅ Updated daily plan ${existing.id} for date ${planDate}`);
+          console.log(`✅ Updated daily plan ${existing.id} for Day ${dayNumber}`);
         } else {
           // Create new daily plan
           // Wrap in try-catch to handle duplicate key errors gracefully
@@ -5497,7 +4885,7 @@ async function syncDailyPlansFromAIPlanHelper(aiPlanId) {
               .insert({
                 user_id: aiPlan.user_id,
                 gym_id: aiPlan.gym_id,
-                plan_date: planDate,
+                day_number: dayNumber,
                 plan_type: 'ai_generated',
                 source_plan_id: aiPlan.id.toString(),
                 plan_category: aiPlan.exercise_plan_category || dayPlan.category || 'General',
@@ -5507,18 +4895,18 @@ async function syncDailyPlansFromAIPlanHelper(aiPlanId) {
               })
               .returning('*');
             dailyPlan = inserted;
-            console.log(`✅ Created daily plan ${inserted.id} for date ${planDate}`);
+            console.log(`✅ Created daily plan ${inserted.id} (Day ${inserted.day_number || 'N/A'})`);
           } catch (insertErr) {
             // Handle duplicate key constraint violation
-            // The unique constraint is: (user_id, plan_date, plan_type, source_plan_id)
+            // The unique constraint is: (user_id, day_number, plan_type, source_plan_id)
             if (insertErr.code === '23505' && insertErr.constraint === 'daily_training_plans_user_plan_unique') {
-              console.log(`⚠️ Duplicate key detected - plan already exists for AI plan (user_id: ${aiPlan.user_id}, plan_date: ${planDate}, plan_type: ai_generated, source_plan_id: ${aiPlan.id}). Fetching existing plan...`);
+              console.log(`⚠️ Duplicate key detected - plan already exists for AI plan (user_id: ${aiPlan.user_id}, day_number: ${dayNumber}, plan_type: ai_generated, source_plan_id: ${aiPlan.id}). Fetching existing plan...`);
               
               // Fetch the existing plan that caused the conflict
               const existingPlan = await db('daily_training_plans')
                 .where({
                   user_id: aiPlan.user_id,
-                  plan_date: planDate,
+                  day_number: dayNumber,
                   plan_type: 'ai_generated',
                   source_plan_id: aiPlan.id.toString(),
                   is_stats_record: false
@@ -5542,7 +4930,7 @@ async function syncDailyPlansFromAIPlanHelper(aiPlanId) {
                   })
                   .returning('*');
                 dailyPlan = updated;
-                console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (date: ${planDate}, plan_type: ai_generated)`);
+                console.log(`✅ Updated existing daily plan ${updated.id} after duplicate key conflict (day_number: ${dayNumber}, plan_type: ai_generated)`);
               } else {
                 // This shouldn't happen, but handle it gracefully
                 console.error(`❌ CRITICAL: Duplicate key error but couldn't find existing plan!`, insertErr);
@@ -5672,4 +5060,137 @@ exports.syncDailyPlansFromAIPlan = async (req, res, next) => {
 exports.syncDailyPlansFromAssignmentHelper = syncDailyPlansFromAssignmentHelper;
 exports.syncDailyPlansFromManualPlanHelper = syncDailyPlansFromManualPlanHelper;
 exports.syncDailyPlansFromAIPlanHelper = syncDailyPlansFromAIPlanHelper;
+
+// Override: day_number-only getDailyPlans (assigned/manual/ai)
+exports.getDailyPlans = async (req, res, next) => {
+  try {
+    const { user_id, day_number, plan_type, include_completed } = req.query;
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
+    const gym_id = req.user.gym_id;
+    const isMobileRequest = req.originalUrl?.includes('/mobile/') || requestingUserRole === 'USER';
+    const shouldIncludeCompleted = include_completed === 'true' || include_completed === true;
+
+    let query = db('daily_training_plans')
+      .select('*')
+      .where('is_stats_record', false)
+      .orderBy('day_number', 'asc');
+
+    // Role-based scoping
+    if (requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer') {
+      if (user_id) query = query.where({ user_id: Number(user_id) });
+      if (gym_id != null) query = query.andWhere({ gym_id });
+    } else {
+      query = query.where({ user_id: requestingUserId, is_stats_record: false });
+      if (!plan_type) {
+        query = query.whereIn('plan_type', ['web_assigned', 'web_assigne']);
+      }
+    }
+
+    // Optional day filter for non-mobile contexts
+    const targetDayNumber = day_number ? Number(day_number) : null;
+    if (targetDayNumber && !isMobileRequest) {
+      query = query.andWhere('day_number', targetDayNumber);
+    }
+
+    // plan_type filter
+    if (plan_type && (requestingUserRole === 'gym_admin' || requestingUserRole === 'trainer')) {
+      if (plan_type === 'web_assigned') {
+        query = query.whereIn('plan_type', ['web_assigned', 'web_assigne']);
+      } else {
+        query = query.andWhere('plan_type', plan_type);
+      }
+    } else if (plan_type && requestingUserRole !== 'gym_admin' && requestingUserRole !== 'trainer') {
+      if (plan_type === 'web_assigned') {
+        query = query.whereIn('plan_type', ['web_assigned', 'web_assigne']);
+      } else {
+        query = query.andWhere('plan_type', plan_type);
+      }
+    }
+
+    let plans = await query;
+
+    // Map assignment_id helper
+    plans.forEach(plan => {
+      if (plan.source_plan_id != null) {
+        const asn = Number(plan.source_plan_id);
+        plan.assignment_id = Number.isNaN(asn) ? null : asn;
+      }
+    });
+
+    // Per-source filtering to start at next incomplete day unless include_completed=true
+    if (!shouldIncludeCompleted) {
+      const bySource = {};
+      plans.forEach(p => {
+        const key = p.source_plan_id || 'no_source';
+        if (!bySource[key]) bySource[key] = [];
+        bySource[key].push(p);
+      });
+
+      const filtered = [];
+      Object.values(bySource).forEach(list => {
+        const sourcePlans = list.filter(p => p.day_number != null).sort((a, b) => (a.day_number || 0) - (b.day_number || 0));
+        const nextIncomplete = sourcePlans.find(p => {
+          const isCompleted = p.is_completed === true ||
+                              p.is_completed === 't' ||
+                              p.is_completed === 1 ||
+                              p.is_completed === 'true' ||
+                              String(p.is_completed).toLowerCase() === 'true';
+          const hasCompletedAt = p.completed_at != null &&
+                                 p.completed_at !== 'null' &&
+                                 p.completed_at !== '' &&
+                                 String(p.completed_at).trim() !== '';
+          return !(isCompleted && hasCompletedAt);
+        });
+
+        if (nextIncomplete) {
+          const cutoff = nextIncomplete.day_number;
+          filtered.push(...sourcePlans.filter(p => (p.day_number || 0) >= cutoff));
+        } else if (sourcePlans.length > 0) {
+          filtered.push(sourcePlans[sourcePlans.length - 1]);
+        }
+      });
+
+      plans = filtered;
+    }
+
+    // Normalize exercises_details JSON
+    for (const plan of plans) {
+      try {
+        const raw = plan.exercises_details;
+        if (raw) {
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          if (Array.isArray(parsed)) {
+            plan.exercises_details = parsed;
+          } else if (parsed && typeof parsed === 'object') {
+            if (Array.isArray(parsed.workouts)) {
+              plan.exercises_details = parsed.workouts;
+              if (Array.isArray(parsed.snapshots)) plan.completion_snapshots = parsed.snapshots;
+            } else if (Array.isArray(parsed.exercises)) {
+              plan.exercises_details = parsed.exercises;
+            } else if (Array.isArray(parsed.items)) {
+              plan.exercises_details = parsed.items;
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error parsing exercises_details for response:', e);
+      }
+      plan.daily_plan_id = plan.id;
+    }
+
+    // Stable ordering
+    plans.sort((a, b) => {
+      const sa = a.source_plan_id || 0;
+      const sb = b.source_plan_id || 0;
+      if (sa !== sb) return sa - sb;
+      return (a.day_number || 0) - (b.day_number || 0);
+    });
+
+    res.json({ success: true, data: plans });
+  } catch (err) {
+    console.error('Error getting daily training plans (day_number override):', err);
+    next(err);
+  }
+};
 

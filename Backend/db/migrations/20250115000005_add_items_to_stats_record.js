@@ -24,10 +24,10 @@ exports.up = async function(knex) {
       .where('daily_training_plans.user_id', user.user_id)
       .select(
         'daily_training_plan_items.*',
-        'daily_training_plans.plan_date',
+        'daily_training_plans.day_number',
         'daily_training_plans.workout_name'
       )
-      .orderBy('daily_training_plans.plan_date', 'desc')
+      .orderBy('daily_training_plans.day_number', 'desc')
       .orderBy('daily_training_plan_items.id', 'asc');
     
     if (allItems.length > 0) {
@@ -45,7 +45,7 @@ exports.up = async function(knex) {
         notes: item.notes,
         is_completed: item.is_completed,
         completed_at: item.completed_at,
-        plan_date: item.plan_date,
+        day_number: item.day_number,
         workout_name: item.workout_name,
         created_at: item.created_at,
         updated_at: item.updated_at

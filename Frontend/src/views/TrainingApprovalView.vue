@@ -192,7 +192,7 @@
               <div class="text-body2">
                 Total Days: {{ dailyPlansData.total_days }} | 
                 <span v-if="dailyPlansData.daily_plans && dailyPlansData.daily_plans.length > 0">
-                  Date Range: {{ formatDate(dailyPlansData.daily_plans[0].plan_date) }} - {{ formatDate(dailyPlansData.daily_plans[dailyPlansData.daily_plans.length - 1].plan_date) }}
+                  Day Range: Day {{ dailyPlansData.daily_plans[0].day_number }} - Day {{ dailyPlansData.daily_plans[dailyPlansData.daily_plans.length - 1].day_number }}
                 </span>
                 <span v-else>No daily plans found</span>
               </div>
@@ -204,13 +204,13 @@
             <q-expansion-item
               v-for="(dailyPlan, index) in dailyPlansData.daily_plans"
               :key="dailyPlan.id"
-              :label="`Day ${index + 1} - ${formatDate(dailyPlan.plan_date)}`"
+              :label="`Day ${dailyPlan.day_number || (index + 1)}`"
               :caption="`${dailyPlan.items ? dailyPlan.items.length : 0} exercises`"
               class="daily-plan-item"
             >
               <template v-slot:header>
                 <q-item-section>
-                  <q-item-label>Day {{ index + 1 }} - {{ formatDate(dailyPlan.plan_date) }}</q-item-label>
+                  <q-item-label>Day {{ dailyPlan.day_number || (index + 1) }}</q-item-label>
                   <q-item-label caption>{{ dailyPlan.items ? dailyPlan.items.length : 0 }} exercises</q-item-label>
                 </q-item-section>
                 <q-item-section side>

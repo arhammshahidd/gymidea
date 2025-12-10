@@ -3936,27 +3936,96 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
       console.log(`✅ Fixed ${fixedCount} plan(s) with incorrect plan_type to 'web_assigned'`);
     }
     
-    // Check if assignment has daily_plans
-    if (!assignment.daily_plans) {
-      console.log(`⚠️ Assignment ${assignmentId} has no daily_plans data`);
-      return [];
-    }
-    
-    // Parse daily_plans
-    let dailyPlans = null;
+  // Check if assignment has daily_plans. If missing, try to backfill from the
+  // source web plan or from exercises_details so assigned plans are not stuck
+  // on Day 1 with nothing persisted in daily_training_plans.
+  if (!assignment.daily_plans) {
+    console.log(`⚠️ Assignment ${assignmentId} has no daily_plans data, attempting to generate...`);
     try {
-      dailyPlans = typeof assignment.daily_plans === 'string'
-        ? JSON.parse(assignment.daily_plans)
-        : assignment.daily_plans;
-    } catch (e) {
-      console.error(`❌ Error parsing daily_plans for assignment ${assignmentId}:`, e);
+      // 1) Try to pull daily_plans from the source training_plans record
+      let fallbackDailyPlans = null;
+      if (assignment.web_plan_id) {
+        const sourcePlan = await db('training_plans')
+          .where({ id: assignment.web_plan_id })
+          .first();
+        if (sourcePlan?.daily_plans) {
+          try {
+            fallbackDailyPlans = typeof sourcePlan.daily_plans === 'string'
+              ? JSON.parse(sourcePlan.daily_plans)
+              : sourcePlan.daily_plans;
+            console.log(`✅ Loaded ${Array.isArray(fallbackDailyPlans) ? fallbackDailyPlans.length : 0} daily_plans from source training_plan ${assignment.web_plan_id}`);
+          } catch (e) {
+            console.error(`⚠️ Could not parse daily_plans from source training_plan ${assignment.web_plan_id}:`, e);
+          }
+        }
+        // If no daily_plans on training_plans, try exercises_details from it
+        if ((!fallbackDailyPlans || !Array.isArray(fallbackDailyPlans) || fallbackDailyPlans.length === 0) && sourcePlan?.exercises_details) {
+          try {
+            const parsed = typeof sourcePlan.exercises_details === 'string'
+              ? JSON.parse(sourcePlan.exercises_details)
+              : sourcePlan.exercises_details;
+            const { createDistributedPlan } = require('../utils/exerciseDistribution');
+            // Use assignment dates if present, otherwise default to today + items length
+            const start = assignment.start_date ? new Date(assignment.start_date) : new Date();
+            const end = assignment.end_date ? new Date(assignment.end_date) : new Date(start.getTime() + (Array.isArray(parsed) ? parsed.length - 1 : 0) * 24 * 60 * 60 * 1000);
+            const distributed = createDistributedPlan({ items: Array.isArray(parsed) ? parsed : [] }, start, end);
+            fallbackDailyPlans = distributed.daily_plans;
+            console.log(`✅ Generated ${fallbackDailyPlans.length} daily_plans from source training_plan exercises_details`);
+          } catch (e) {
+            console.error(`⚠️ Failed to generate daily_plans from source training_plan exercises_details:`, e);
+          }
+        }
+      }
+
+      // 2) If still nothing, generate from assignment.exercises_details
+      if ((!fallbackDailyPlans || !Array.isArray(fallbackDailyPlans) || fallbackDailyPlans.length === 0) && assignment.exercises_details) {
+        try {
+          const parsed = typeof assignment.exercises_details === 'string'
+            ? JSON.parse(assignment.exercises_details)
+            : assignment.exercises_details;
+          const { createDistributedPlan } = require('../utils/exerciseDistribution');
+          const start = assignment.start_date ? new Date(assignment.start_date) : new Date();
+          const end = assignment.end_date ? new Date(assignment.end_date) : new Date(start.getTime() + (Array.isArray(parsed) ? parsed.length - 1 : 0) * 24 * 60 * 60 * 1000);
+          const distributed = createDistributedPlan({ items: Array.isArray(parsed) ? parsed : [] }, start, end);
+          fallbackDailyPlans = distributed.daily_plans;
+          console.log(`✅ Generated ${fallbackDailyPlans.length} daily_plans from assignment.exercises_details`);
+        } catch (e) {
+          console.error(`⚠️ Failed to generate daily_plans from assignment.exercises_details:`, e);
+        }
+      }
+
+      // Persist the generated daily_plans back to the assignment for future syncs
+      if (Array.isArray(fallbackDailyPlans) && fallbackDailyPlans.length > 0) {
+        await db('training_plan_assignments')
+          .where({ id: assignmentId })
+          .update({ daily_plans: JSON.stringify(fallbackDailyPlans) });
+        assignment.daily_plans = fallbackDailyPlans;
+        console.log(`✅ Saved generated daily_plans back to assignment ${assignmentId}`);
+      } else {
+        console.log(`⚠️ Could not generate daily_plans for assignment ${assignmentId}; aborting sync`);
+        return [];
+      }
+    } catch (genErr) {
+      console.error(`❌ Error generating daily_plans for assignment ${assignmentId}:`, genErr);
       return [];
     }
-    
-    if (!Array.isArray(dailyPlans) || dailyPlans.length === 0) {
-      console.log(`⚠️ Assignment ${assignmentId} has empty or invalid daily_plans`);
-      return [];
-    }
+  }
+  
+  // Parse daily_plans (assignment.daily_plans may now be generated above)
+  let dailyPlans = null;
+  try {
+    dailyPlans = typeof assignment.daily_plans === 'string'
+      ? JSON.parse(assignment.daily_plans)
+      : assignment.daily_plans;
+  } catch (e) {
+    console.error(`❌ Error parsing daily_plans for assignment ${assignmentId}:`, e);
+    return [];
+  }
+  
+  if (!Array.isArray(dailyPlans) || dailyPlans.length === 0) {
+    console.log(`⚠️ Assignment ${assignmentId} has empty or invalid daily_plans after generation attempt`);
+    return [];
+  }
     
     console.log(`📊 Found ${dailyPlans.length} daily plans in assignment ${assignmentId}`);
     
@@ -3997,17 +4066,24 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
     // but we need dates relative to the assignment's start_date (which should be the same, but recalculate to be safe)
     // Parse start_date and normalize to LOCAL date-only (YYYY-MM-DD) to avoid timezone shifting backwards
    
-    let startDateStr;
-    if (assignment.start_date instanceof Date) {
-      const d = assignment.start_date;
-      const year = d.getFullYear();              // LOCAL year
-      const month = String(d.getMonth() + 1).padStart(2, '0'); // LOCAL month
-      const day = String(d.getDate()).padStart(2, '0');        // LOCAL day
-      startDateStr = `${year}-${month}-${day}`;
-    } else {
-      // If it's a string from DB, it should already be in YYYY-MM-DD or ISO format
-      startDateStr = assignment.start_date.split('T')[0];
-    }
+  let startDateStr;
+  if (!assignment.start_date) {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    startDateStr = `${y}-${m}-${d}`;
+    console.warn(`⚠️ assignment ${assignmentId} missing start_date, defaulting to today ${startDateStr}`);
+  } else if (assignment.start_date instanceof Date) {
+    const d = assignment.start_date;
+    const year = d.getFullYear();              // LOCAL year
+    const month = String(d.getMonth() + 1).padStart(2, '0'); // LOCAL month
+    const day = String(d.getDate()).padStart(2, '0');        // LOCAL day
+    startDateStr = `${year}-${month}-${day}`;
+  } else {
+    // If it's a string from DB, it should already be in YYYY-MM-DD or ISO format
+    startDateStr = assignment.start_date.split('T')[0];
+  }
     
     // IMPORTANT: Check last completed day_number and start from next day (only on sync, not first creation)
     // Find the last completed daily plan for this assignment (by day_number)
@@ -4050,16 +4126,26 @@ async function syncDailyPlansFromAssignmentHelper(assignmentId) {
     const assignmentStartDate = new Date(Date.UTC(startYear, startMonth - 1, startDay, 0, 0, 0, 0));
     
     // Parse end_date similarly (LOCAL date)
-    let endDateStr;
-    if (assignment.end_date instanceof Date) {
-      const dEnd = assignment.end_date;
-      const endYearLocal = dEnd.getFullYear();
-      const endMonthLocal = String(dEnd.getMonth() + 1).padStart(2, '0');
-      const endDayLocal = String(dEnd.getDate()).padStart(2, '0');
-      endDateStr = `${endYearLocal}-${endMonthLocal}-${endDayLocal}`;
-    } else {
-      endDateStr = assignment.end_date.split('T')[0];
-    }
+  let endDateStr;
+  if (!assignment.end_date) {
+    // Fallback: use startDateStr plus (expectedDays - 1) days, or startDateStr if unknown
+    const startFallback = new Date(startDateStr);
+    const endFallback = new Date(startFallback);
+    endFallback.setDate(startFallback.getDate() + Math.max(expectedDays - 1, 0));
+    const y = endFallback.getFullYear();
+    const m = String(endFallback.getMonth() + 1).padStart(2, '0');
+    const d = String(endFallback.getDate()).padStart(2, '0');
+    endDateStr = `${y}-${m}-${d}`;
+    console.warn(`⚠️ assignment ${assignmentId} missing end_date, defaulting to ${endDateStr}`);
+  } else if (assignment.end_date instanceof Date) {
+    const dEnd = assignment.end_date;
+    const endYearLocal = dEnd.getFullYear();
+    const endMonthLocal = String(dEnd.getMonth() + 1).padStart(2, '0');
+    const endDayLocal = String(dEnd.getDate()).padStart(2, '0');
+    endDateStr = `${endYearLocal}-${endMonthLocal}-${endDayLocal}`;
+  } else {
+    endDateStr = assignment.end_date.split('T')[0];
+  }
     
     const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number);
     const assignmentEndDate = new Date(Date.UTC(endYear, endMonth - 1, endDay, 23, 59, 59, 999));

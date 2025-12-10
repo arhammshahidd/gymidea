@@ -993,16 +993,14 @@ exports.assign = async (req, res, next) => {
         .returning('*');
 
       // Sync daily plans from assignment to daily_training_plans table
-      // This is for assigned plans only (not manual or AI-generated)
-      if (assignment.daily_plans) {
-        try {
-          const { syncDailyPlansFromAssignmentHelper } = require('./DailyTrainingController');
-          await syncDailyPlansFromAssignmentHelper(assignment.id);
-          console.log(`✅ Synced daily plans from assignment ${assignment.id} to daily_training_plans`);
-        } catch (syncErr) {
-          console.error('⚠️ Failed to sync daily plans from assignment:', syncErr?.message || syncErr);
-          // Don't fail the assignment creation if sync fails
-        }
+      // Run even if daily_plans is null; helper now backfills from source plan/items
+      try {
+        const { syncDailyPlansFromAssignmentHelper } = require('./DailyTrainingController');
+        await syncDailyPlansFromAssignmentHelper(assignment.id);
+        console.log(`✅ Synced daily plans from assignment ${assignment.id} to daily_training_plans`);
+      } catch (syncErr) {
+        console.error('⚠️ Failed to sync daily plans from assignment:', syncErr?.message || syncErr);
+        // Don't fail the assignment creation if sync fails
       }
 
       // Mirror assignment to mobile
@@ -1121,16 +1119,14 @@ exports.assign = async (req, res, next) => {
     }
 
     // Sync daily plans from assignment to daily_training_plans table
-    // This is for assigned plans only (not manual or AI-generated)
-    if (assignment.daily_plans) {
-      try {
-        const { syncDailyPlansFromAssignmentHelper } = require('./DailyTrainingController');
-        await syncDailyPlansFromAssignmentHelper(assignment.id);
-        console.log(`✅ Synced daily plans from assignment ${assignment.id} to daily_training_plans`);
-      } catch (syncErr) {
-        console.error('⚠️ Failed to sync daily plans from assignment:', syncErr?.message || syncErr);
-        // Don't fail the assignment creation if sync fails
-      }
+    // Run even if daily_plans is null; helper now backfills from source plan/items
+    try {
+      const { syncDailyPlansFromAssignmentHelper } = require('./DailyTrainingController');
+      await syncDailyPlansFromAssignmentHelper(assignment.id);
+      console.log(`✅ Synced daily plans from assignment ${assignment.id} to daily_training_plans`);
+    } catch (syncErr) {
+      console.error('⚠️ Failed to sync daily plans from assignment:', syncErr?.message || syncErr);
+      // Don't fail the assignment creation if sync fails
     }
 
     return res.status(201).json({ success: true, data: assignment, assignment: true });

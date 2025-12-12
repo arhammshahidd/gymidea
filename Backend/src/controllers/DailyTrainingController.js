@@ -20,7 +20,8 @@ const normalizeDate = (dateStr) => {
 // Get daily training plans for a user (day_number only)
 exports.getDailyPlans = async (req, res, next) => {
   try {
-    const { user_id, day_number, plan_type, include_completed } = req.query;
+    // Note: `date` was previously referenced without being defined; include it here for backward compatibility.
+    const { user_id, day_number, plan_type, include_completed, date } = req.query;
     const requestingUserId = req.user.id;
     const requestingUserRole = req.user.role;
     const gym_id = req.user.gym_id;
